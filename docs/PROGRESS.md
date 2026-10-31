@@ -15,7 +15,9 @@ El motor de audio y la biblioteca funcionan desde línea de comandos con todos l
 | 5. Interfaz en WebView2 | **Siguiente** |
 | 6. Cierre | Sin empezar |
 
-El repositorio está versionado en la rama `main`, solo en local: todavía no tiene remoto. La identidad de git está configurada únicamente para este repositorio. El usuario dejó el control de versiones a criterio del asistente; publicar en un remoto sigue requiriendo su confirmación.
+El repositorio está en la rama `main` y se publica como repositorio público de GitHub. La identidad de git está configurada únicamente para este repositorio, con el correo `noreply` de GitHub. El usuario dejó el control de versiones a criterio del asistente.
+
+Como es público, ningún archivo ni mensaje de commit debe llevar rutas personales, el correo real ni nombres de la colección: en estos documentos, `D:\Música`, `pista-dsd128.dsf` y similares son ejemplos, no rutas reales.
 
 ## Cómo retomar
 
