@@ -158,6 +158,28 @@ target_link_libraries(arpegio_core
     PUBLIC avrt ole32 advapi32 user32 uuid mfplat mfreadwrite mfuuid propsys shlwapi windowscodecs
     PRIVATE FLAC vorbisfile vorbis wavpack monkeysaudio sqlite3 tag)
 
+add_library(arpegio_app STATIC
+    src/app/controller.cpp
+    src/app/settings.cpp
+)
+target_include_directories(arpegio_app SYSTEM PUBLIC third_party/json/single_include)
+target_link_libraries(arpegio_app PUBLIC arpegio_core)
+
+add_executable(arpegio WIN32
+    src/app/main.cpp
+    src/app/main_window.cpp
+    src/app/arpegio.rc
+)
+target_include_directories(arpegio PRIVATE src/app)
+target_include_directories(arpegio SYSTEM PRIVATE third_party/webview2/build/native/include)
+target_link_libraries(arpegio PRIVATE arpegio_app dwmapi shell32
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/webview2/build/native/x64/WebView2LoaderStatic.lib)
+# The page is served from a folder next to the executable. A target of its own, because a change that
+# only touches the page does not relink anything.
+add_custom_target(arpegio-ui ALL
+    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/ui $<TARGET_FILE_DIR:arpegio>/ui)
+add_dependencies(arpegio arpegio-ui)
+
 add_executable(arpegio-cli cli/main.cpp)
 target_link_libraries(arpegio-cli PRIVATE arpegio_core)
 
@@ -185,7 +207,8 @@ add_executable(arpegio-tests
     tests/test_render_plan.cpp
     tests/test_player.cpp
     tests/test_library.cpp
+    tests/test_controller.cpp
 )
 target_include_directories(arpegio-tests SYSTEM PRIVATE ${TAGLIB_INCLUDE_DIRS})
-target_link_libraries(arpegio-tests PRIVATE arpegio_core tag FLAC)
+target_link_libraries(arpegio-tests PRIVATE arpegio_app tag FLAC)
 add_test(NAME arpegio-tests COMMAND arpegio-tests)
