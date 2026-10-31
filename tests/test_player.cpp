@@ -227,6 +227,274 @@ TEST(seek_right_after_play_is_not_lost) {
     CHECK(f.player.wait_until_stopped(5000));
 }
 
+namespace {
+
+constexpr uint64_t kTrackTwo = 1000000;  // first ramp value of the second track, far from the first one
+
+// Keeps reopening visible: a jump inside a stream must not touch the device.
+struct CountingFixture {
+    std::shared_ptr<std::vector<uint8_t>> capture = std::make_shared<std::vector<uint8_t>>();
+    std::atomic<int> opened{0};
+    Player player;
+
+    CountingFixture()
+        : player([this](const DeviceInfo&, const OutputOptions&) -> std::unique_ptr<Output> {
+              ++opened;
+              return std::make_unique<CaptureOutput>(capture);
+          }) {
+        player.set_device(fake_device());
+    }
+};
+
+// The fake device runs some forty times faster than real time, so a short track can be over before the
+// test gets to look at it. Paused, the position holds still while the loader goes on filling the ring.
+void hold_at_first_sound(Player& player) {
+    while (player.status().position_seconds < 0.02) Sleep(1);
+    player.set_paused(true);
+}
+
+bool wait_for_position(Player& player, double seconds) {
+    for (int i = 0; i < 2000; ++i) {
+        if (player.status().position_seconds >= seconds) return true;
+        Sleep(2);
+    }
+    return false;
+}
+
+bool wait_for_index(Player& player, size_t index) {
+    for (int i = 0; i < 2000; ++i) {
+        if (player.status().queue_index == index) return true;
+        Sleep(2);
+    }
+    return false;
+}
+
+// The capture contains this ramp value somewhere after `from`.
+bool contains_sample(const std::vector<uint8_t>& capture, size_t from, int64_t value) {
+    const int32_t wanted = static_cast<int32_t>(value * 256);
+    for (size_t at = from; at + 4 <= capture.size(); at += 8) {
+        int32_t sample = 0;
+        std::memcpy(&sample, capture.data() + at, 4);
+        if (sample == wanted) return true;
+    }
+    return false;
+}
+
+}  // namespace
+
+TEST(seek_applies_to_the_track_being_heard_not_the_one_being_decoded) {
+    Fixture f;
+    constexpr uint64_t kFrames = 96000 * 8;  // much shorter than the ring: the loader is already on track 2
+    f.player.set_queue({ramp(1, kFrames), ramp(kTrackTwo, kFrames)});
+    f.player.play();
+    hold_at_first_sound(f.player);
+    Sleep(50);
+    CHECK(f.player.status().queue_index == 0);
+
+    const size_t before = f.capture->size();
+    f.player.seek(4.0);
+    CHECK(wait_for_position(f.player, 4.0));
+    CHECK(f.player.status().queue_index == 0);
+    f.player.set_paused(false);
+    Sleep(50);
+    f.player.stop();
+    CHECK(f.player.wait_until_stopped(5000));
+
+    CHECK(contains_sample(*f.capture, before, 1 + 96000 * 4));
+    CHECK(f.player.status().error.empty());
+}
+
+TEST(seek_while_the_last_track_plays_out) {
+    Fixture f;
+    f.player.set_queue({ramp(1, 96000 * 8)});
+    f.player.play();
+    hold_at_first_sound(f.player);
+    Sleep(100);  // the whole track is decoded by now and only the ring is left
+
+    f.player.seek(1.0);
+    CHECK(wait_for_position(f.player, 1.0));
+    f.player.set_paused(false);
+    Sleep(50);
+    f.player.stop();
+    CHECK(f.player.wait_until_stopped(5000));
+    CHECK(contains_sample(*f.capture, 0, 1 + 96000));
+}
+
+TEST(next_stays_in_the_open_stream) {
+    CountingFixture f;
+    f.player.set_queue({ramp(1, 96000 * 8), ramp(kTrackTwo, 96000 * 8)});
+    f.player.play();
+    hold_at_first_sound(f.player);
+
+    const size_t before = f.capture->size();
+    f.player.next();
+    CHECK(wait_for_index(f.player, 1));
+    f.player.set_paused(false);
+    Sleep(50);
+    f.player.stop();
+    CHECK(f.player.wait_until_stopped(5000));
+
+    CHECK(f.opened == 1);
+    CHECK(contains_sample(*f.capture, before, kTrackTwo));
+    CHECK(f.player.status().underruns == 0);
+}
+
+TEST(next_on_the_last_track_ends_the_queue) {
+    Fixture f;
+    f.player.set_queue({ramp(1, 96000 * 8)});
+    f.player.play();
+    while (f.player.status().position_seconds < 0.02) Sleep(1);
+    f.player.next();
+    CHECK(f.player.wait_until_stopped(5000));
+    CHECK(f.player.status().error.empty());
+}
+
+TEST(previous_restarts_the_track_and_then_goes_back) {
+    CountingFixture f;
+    f.player.set_queue({ramp(1, 96000 * 8), ramp(kTrackTwo, 96000 * 8)});
+    f.player.play(1, 5.0);
+    hold_at_first_sound(f.player);
+    CHECK(wait_for_position(f.player, 5.0));
+    CHECK(f.player.status().queue_index == 1);
+
+    f.player.previous();
+    for (int i = 0; i < 2000 && f.player.status().position_seconds > 3.0; ++i) Sleep(2);
+    CHECK(f.player.status().queue_index == 1);
+    CHECK(f.player.status().position_seconds <= 3.0);
+
+    f.player.previous();
+    CHECK(wait_for_index(f.player, 0));
+    f.player.stop();
+    CHECK(f.player.wait_until_stopped(5000));
+    CHECK(f.opened == 1);
+}
+
+TEST(play_while_playing_reuses_the_device) {
+    CountingFixture f;
+    f.player.set_queue({ramp(1, 96000 * 20), ramp(kTrackTwo, 96000 * 200)});
+    f.player.play();
+    hold_at_first_sound(f.player);
+    f.player.play(1, 2.0);
+    CHECK(wait_for_index(f.player, 1));
+    CHECK(wait_for_position(f.player, 2.0));
+    f.player.stop();
+    CHECK(f.player.wait_until_stopped(5000));
+    CHECK(f.opened == 1);
+}
+
+TEST(a_jump_to_another_format_reopens_at_once) {
+    CountingFixture f;
+    f.player.set_queue({ramp(1, 96000 * 30, 96000), ramp(1, 44100 * 2, 44100)});
+    f.player.play();
+    while (f.player.status().position_seconds < 0.02) Sleep(1);
+    f.player.next();
+    CHECK(wait_for_index(f.player, 1));
+    CHECK(f.player.wait_until_stopped(5000));
+    CHECK(f.opened == 2);
+    CHECK(f.player.status().error.empty());
+}
+
+TEST(appending_while_the_last_track_plays_out_continues_the_stream) {
+    CountingFixture f;
+    f.player.set_queue({ramp(1, 96000 * 8)});
+    f.player.play();
+    hold_at_first_sound(f.player);
+    Sleep(100);
+
+    std::vector<QueueItem> longer = {ramp(1, 96000 * 8), ramp(1 + 96000 * 8, 96000)};
+    f.player.update_queue(std::move(longer), 0);
+    f.player.set_paused(false);
+    CHECK(f.player.wait_until_stopped(30000));
+    CHECK(f.opened == 1);
+
+    // Nothing was lost or repeated across the join. The ramp is never zero, so skipping zeros only
+    // removes the silence of the pause.
+    std::vector<int32_t> samples(f.capture->size() / 4);
+    std::memcpy(samples.data(), f.capture->data(), samples.size() * 4);
+    uint64_t expected = 1;
+    bool exact = true;
+    for (size_t i = 0; i < samples.size() && exact; i += 2) {
+        if (samples[i] == 0) continue;
+        exact = samples[i] == static_cast<int32_t>(expected * 256);
+        ++expected;
+    }
+    CHECK(exact);
+    CHECK(expected == 96000ull * 9 + 1);
+}
+
+TEST(editing_the_tracks_already_in_the_ring_refills_from_the_position_heard) {
+    CountingFixture f;
+    QueueItem first = ramp(1, 96000 * 8);
+    QueueItem second = ramp(kTrackTwo, 96000 * 8);
+    QueueItem third = ramp(5000000, 96000 * 8);
+    first.id = 1;
+    second.id = 2;
+    third.id = 3;
+    f.player.set_queue({first, second});
+    f.player.play();
+    hold_at_first_sound(f.player);
+    Sleep(50);
+    const size_t before = f.capture->size();
+
+    f.player.update_queue({first, third}, 0);  // the second track was already decoded
+    f.player.set_paused(false);
+    CHECK(wait_for_index(f.player, 1));
+    CHECK(f.player.wait_until_stopped(30000));
+    CHECK(f.opened == 1);
+    CHECK(contains_sample(*f.capture, before, 5000000));
+}
+
+TEST(editing_before_the_current_track_only_renumbers_it) {
+    CountingFixture f;
+    QueueItem first = ramp(1, 96000 * 40);
+    QueueItem second = ramp(kTrackTwo, 96000 * 40);
+    first.id = 1;
+    second.id = 2;
+    f.player.set_queue({first, second});
+    f.player.play(1);
+    hold_at_first_sound(f.player);
+    CHECK(f.player.status().queue_index == 1);
+
+    const double position = f.player.status().position_seconds;
+    f.player.update_queue({second}, 0);
+    CHECK(f.player.status().queue_index == 0);
+    CHECK(f.player.status().position_seconds >= position);
+    f.player.stop();
+    CHECK(f.player.wait_until_stopped(5000));
+    CHECK(f.opened == 1);
+}
+
+TEST(repeat_track_keeps_the_index_and_repeat_queue_wraps_around) {
+    Fixture f;
+    f.player.set_repeat(RepeatMode::Track);
+    f.player.set_queue({ramp(1, 9600), ramp(kTrackTwo, 9600)});
+    f.player.play();
+    Sleep(200);
+    CHECK(f.player.status().queue_index == 0);
+    CHECK(f.player.status().state == PlayerState::Playing);
+
+    f.player.set_repeat(RepeatMode::Queue);
+    CHECK(wait_for_index(f.player, 1));
+    CHECK(wait_for_index(f.player, 0));
+    CHECK(f.player.status().state == PlayerState::Playing);
+    f.player.stop();
+    CHECK(f.player.wait_until_stopped(5000));
+}
+
+TEST(status_reports_the_plan_of_the_open_stream) {
+    Fixture f;
+    f.player.set_queue({ramp(1, 96000 * 8)});
+    CHECK(!f.player.status().stream_open);
+    f.player.play();
+    while (!f.player.status().stream_open) Sleep(1);
+    const PlayerStatus status = f.player.status();
+    CHECK(status.plan.path == RenderPath::Pcm);
+    CHECK(status.plan.device.rate == 96000);
+    f.player.stop();
+    CHECK(f.player.wait_until_stopped(5000));
+    CHECK(!f.player.status().stream_open);
+}
+
 TEST(native_dsd_passes_through_untouched) {
     Fixture f;
     QueueItem item;

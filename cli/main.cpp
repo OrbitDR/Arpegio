@@ -219,8 +219,7 @@ int play(int argc, wchar_t** argv) {
     player.set_device(*device, options);
     player.set_policy(policy);
     player.set_queue(std::move(queue));
-    player.play(first);
-    if (start > 0.0) player.seek(start);
+    player.play(first, start);
 
     std::string path_shown;
     const DWORD begin = GetTickCount();

@@ -21,6 +21,7 @@ constexpr size_t kMinRingBytes = 32 * 1024 * 1024;
 constexpr double kPrefillSeconds = 1.0;
 constexpr double kSeekRefillSeconds = 0.2;
 constexpr DWORD kLoaderPollMs = 10;
+constexpr double kRestartSeconds = 3.0;  // past this, previous() restarts the track
 
 }  // namespace
 
@@ -110,12 +111,52 @@ void Player::set_policy(const PlaybackPolicy& policy) {
     policy_ = policy;
 }
 
+void Player::set_repeat(RepeatMode mode) {
+    std::lock_guard lock(mutex_);
+    repeat_ = mode;
+}
+
 void Player::set_queue(std::vector<QueueItem> items) {
     std::lock_guard lock(mutex_);
     queue_ = std::move(items);
 }
 
-void Player::play(size_t index) {
+void Player::update_queue(std::vector<QueueItem> items, size_t current) {
+    std::lock_guard lock(mutex_);
+    if (!active_ || jump_request_) {
+        queue_ = std::move(items);
+        if (jump_request_) jump_request_->index = current;
+        else loader_index_ = current;
+        return;
+    }
+
+    // The loader sits before the heard track only when it wrapped around to repeat.
+    const size_t heard = heard_index();
+    bool kept = loader_index_ >= heard;
+    for (size_t i = 0; kept && heard + i <= loader_index_; ++i) {
+        if (heard + i < queue_.size()) {
+            kept = current + i < items.size() && items[current + i].id == queue_[heard + i].id;
+        }
+    }
+    if (kept) {
+        for (Segment& segment : segments_) segment.queue_index += current - heard;
+        loader_index_ += current - heard;
+    } else {
+        jump_request_ = Jump{current, heard_position()};
+    }
+    queue_ = std::move(items);
+}
+
+void Player::play(size_t index, double start_seconds) {
+    {
+        std::lock_guard lock(mutex_);
+        if (active_ && !stop_requested()) {
+            error_.clear();
+            paused_.store(false, std::memory_order_release);
+            jump_request_ = Jump{index, start_seconds};
+            return;
+        }
+    }
     stop();
     {
         std::unique_lock lock(mutex_);
@@ -123,11 +164,25 @@ void Player::play(size_t index) {
         stop_flag_.store(false, std::memory_order_release);
         paused_.store(false, std::memory_order_release);
         error_.clear();
-        seek_request_.reset();
-        play_request_ = index;
+        jump_request_.reset();
+        play_request_ = Jump{index, start_seconds};
+        loader_index_ = index;
         active_ = true;
     }
     wake_.notify_all();
+}
+
+void Player::next() {
+    std::lock_guard lock(mutex_);
+    if (active_ && !stop_requested()) jump_request_ = Jump{heard_index() + 1, 0.0};
+}
+
+void Player::previous() {
+    std::lock_guard lock(mutex_);
+    if (!active_ || stop_requested()) return;
+    const size_t heard = heard_index();
+    const bool restart = heard == 0 || heard_position() > kRestartSeconds;
+    jump_request_ = Jump{restart ? heard : heard - 1, 0.0};
 }
 
 void Player::set_paused(bool paused) {
@@ -140,7 +195,7 @@ void Player::stop() {
 
 void Player::seek(double seconds) {
     std::lock_guard lock(mutex_);
-    seek_request_ = std::max(seconds, 0.0);
+    if (active_ && !stop_requested()) jump_request_ = Jump{heard_index(), std::max(seconds, 0.0)};
 }
 
 bool Player::wait_until_stopped(uint32_t timeout_ms) {
@@ -156,6 +211,8 @@ PlayerStatus Player::status() const {
     status.error = error_;
     status.signal_path = signal_path_;
     status.bit_perfect = bit_perfect_;
+    status.hardware_gain_db = hardware_gain_db_;
+    status.queue_index = heard_index();
     status.clipped_samples = clipped_.load(std::memory_order_relaxed);
     status.reopened = reopened_.load(std::memory_order_relaxed);
     status.underruns = last_underruns_;
@@ -165,19 +222,37 @@ PlayerStatus Player::status() const {
     status.underruns = session_->underruns.load(std::memory_order_relaxed);
     status.buffered_bytes = session_->ring.readable();
     status.ring_capacity = session_->ring.capacity();
+    status.stream_open = true;
+    status.plan = plan_;
 
+    if (const Segment* current = heard_segment()) {
+        status.duration_seconds = current->duration_seconds;
+        status.position_seconds = heard_position();
+    }
+    return status;
+}
+
+const Player::Segment* Player::heard_segment() const {
+    if (!session_) return nullptr;
     const uint64_t played = session_->ring.total_read();
     const Segment* current = nullptr;
     for (const Segment& segment : segments_) {
         if (segment.ring_position <= played) current = &segment;
     }
-    if (current) {
-        status.queue_index = current->queue_index;
-        status.duration_seconds = current->duration_seconds;
-        status.position_seconds = current->start_seconds + static_cast<double>(played - current->ring_position) /
-                                                               (plan_.device.frame_bytes() * plan_.device.ring_frame_rate());
-    }
-    return status;
+    return current;
+}
+
+size_t Player::heard_index() const {
+    if (jump_request_) return jump_request_->index;
+    const Segment* current = heard_segment();
+    return current ? current->queue_index : loader_index_;
+}
+
+double Player::heard_position() const {
+    const Segment* current = heard_segment();
+    if (!current) return 0.0;
+    return current->start_seconds + static_cast<double>(session_->ring.total_read() - current->ring_position) /
+                                        (plan_.device.frame_bytes() * plan_.device.ring_frame_rate());
 }
 
 void Player::set_error(const std::string& text) {
@@ -274,7 +349,7 @@ bool Player::write_all(const std::vector<uint8_t>& bytes) {
             if (stop_requested()) return false;
             {
                 std::lock_guard lock(mutex_);
-                if (seek_request_) return false;
+                if (jump_request_) return false;
             }
             reopen_output_if_needed();
             if (ring.writable() >= ring.capacity() / 2) break;
@@ -284,15 +359,37 @@ bool Player::write_all(const std::vector<uint8_t>& bytes) {
     return true;
 }
 
-Player::PumpResult Player::pump(Decoder& decoder, const SourceFormat& source, size_t index) {
+// Moves the loader to the requested track and drops what the ring holds. The device gets silence until
+// the audio of that track arrives. Returns where in the track to start.
+std::optional<double> Player::take_jump() {
+    std::lock_guard lock(mutex_);
+    if (!jump_request_) return std::nullopt;
+    const double seconds = jump_request_->seconds;
+    loader_index_ = jump_request_->index;
+    jump_request_.reset();
+    if (session_) {
+        session_->refilling.store(true, std::memory_order_release);
+        session_->feeding.store(true, std::memory_order_release);
+        session_->ring.discard();
+        segments_.clear();
+    }
+    return seconds;
+}
+
+Player::PumpResult Player::pump(Decoder& decoder, const SourceFormat& source, std::optional<double> seek) {
     const double bytes_per_second = static_cast<double>(plan_.device.frame_bytes()) * plan_.device.ring_frame_rate();
     uint64_t refill_target = 0;
     for (;;) {
         if (stop_requested()) return PumpResult::Stop;
-        std::optional<double> seek;
+        size_t index = 0;
         {
             std::lock_guard lock(mutex_);
-            seek.swap(seek_request_);
+            index = loader_index_;
+            if (jump_request_) {
+                if (jump_request_->index != index) return PumpResult::Jump;
+                seek = jump_request_->seconds;
+                jump_request_.reset();
+            }
         }
         if (seek) {
             const double seconds = std::min(*seek, source.seconds());
@@ -303,6 +400,7 @@ Player::PumpResult Player::pump(Decoder& decoder, const SourceFormat& source, si
             pipeline_->reset();
             add_segment(index, seconds, source.seconds());
             refill_target = session_->ring.total_written() + static_cast<uint64_t>(bytes_per_second * kSeekRefillSeconds);
+            seek.reset();
         }
 
         const bool more = pipeline_->produce(decoder, chunk_);
@@ -316,11 +414,22 @@ Player::PumpResult Player::pump(Decoder& decoder, const SourceFormat& source, si
     }
 }
 
-void Player::drain() {
+// False when a stop, a jump or a queue that grew cut it short.
+bool Player::play_out(bool end_of_queue) {
+    std::vector<uint8_t> tail;
+    pipeline_->flush(tail);
+    return write_all(tail) && drain(end_of_queue);
+}
+
+bool Player::drain(bool end_of_queue) {
     session_->feeding.store(false, std::memory_order_release);
     start_output_if_ready(true);
     while (session_->ring.readable() > 0) {
-        if (stop_requested()) return;
+        if (stop_requested()) return false;
+        {
+            std::lock_guard lock(mutex_);
+            if (jump_request_ || (end_of_queue && loader_index_ < queue_.size())) return false;
+        }
         reopen_output_if_needed();
         Sleep(kLoaderPollMs);
     }
@@ -329,9 +438,10 @@ void Player::drain() {
     const uint64_t rate = std::max<uint32_t>(plan_.device.ring_frame_rate(), 1);
     const uint64_t frames = 2ull * stats.period_frames + stats.latency_frames;
     Sleep(static_cast<DWORD>(frames * 1000 / rate) + kLoaderPollMs);
+    return true;
 }
 
-void Player::run_queue(size_t index) {
+void Player::run_queue(double start_seconds) {
     PlaybackPolicy policy;
     DeviceInfo device;
     {
@@ -339,13 +449,41 @@ void Player::run_queue(size_t index) {
         policy = policy_;
         device = device_;
     }
+    device.hardware_gain_db = current_hardware_gain_db(device);
+    {
+        std::lock_guard lock(mutex_);
+        hardware_gain_db_ = device.hardware_gain_db;
+    }
+
+    std::optional<double> start;
+    if (start_seconds > 0.0) start = start_seconds;
+    bool jumped = false;  // the ring was dropped, so nothing is left to play out
+
+    const auto follow_jump = [&] {
+        start = take_jump();
+        jumped = start.has_value();
+    };
 
     for (;;) {
         QueueItem item;
+        bool found = false;
+        size_t index = 0;
         {
             std::lock_guard lock(mutex_);
-            if (index >= queue_.size()) break;
-            item = queue_[index];
+            const bool wraps = repeat_ == RepeatMode::Queue && !jumped && !queue_.empty();
+            if (wraps && loader_index_ >= queue_.size()) loader_index_ = 0;
+            index = loader_index_;
+            found = index < queue_.size();
+            if (found) item = queue_[index];
+        }
+
+        if (!found) {
+            if (!session_ || jumped) return;
+            if (play_out(true) || stop_requested()) return;
+            follow_jump();  // without a jump the queue grew, and the stream simply carries on
+            session_->feeding.store(true, std::memory_order_release);
+            pipeline_->reset();
+            continue;
         }
 
         auto decoder = item.open ? item.open() : open_decoder(item.path);
@@ -357,48 +495,57 @@ void Player::run_queue(size_t index) {
         const bool continues = session_ && plan == plan_ && source.rate == pipeline_source_.rate &&
                                source.channels == pipeline_source_.channels;
         if (session_ && !continues) {
-            std::vector<uint8_t> tail;
-            pipeline_->flush(tail);
-            write_all(tail);
-            drain();
-            if (stop_requested()) return;
+            if (!jumped && !play_out(false)) {
+                if (stop_requested()) return;
+                follow_jump();
+                continue;
+            }
             close_session();
         }
         if (!session_) open_session(plan, source);
 
         add_segment(index, 0.0, source.seconds());
-        if (pump(*decoder, source, index) != PumpResult::Finished) return;
-        ++index;
-    }
+        const PumpResult result = pump(*decoder, source, start);
+        if (result == PumpResult::Stop) return;
+        if (result == PumpResult::Jump) {
+            follow_jump();
+            continue;
+        }
 
-    if (session_) {
-        std::vector<uint8_t> tail;
-        pipeline_->flush(tail);
-        write_all(tail);
-        drain();
+        std::lock_guard lock(mutex_);
+        if (repeat_ != RepeatMode::Track) ++loader_index_;
+        start.reset();
+        jumped = false;
     }
 }
 
 void Player::worker() {
     const HRESULT com = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     for (;;) {
-        size_t index = 0;
+        double start_seconds = 0.0;
         {
             std::unique_lock lock(mutex_);
             wake_.wait(lock, [this] { return quit_ || play_request_.has_value(); });
             if (quit_) break;
-            index = *play_request_;
+            loader_index_ = play_request_->index;
+            start_seconds = play_request_->seconds;
             play_request_.reset();
         }
         try {
-            run_queue(index);
+            run_queue(start_seconds);
         } catch (const std::exception& error) {
             set_error(error.what());
         }
         close_session();
         {
             std::lock_guard lock(mutex_);
-            active_ = false;
+            // A request made while the stream was closing still counts.
+            if (jump_request_ && !stop_requested()) {
+                play_request_.swap(jump_request_);
+            } else {
+                jump_request_.reset();
+                active_ = false;
+            }
         }
         stopped_.notify_all();
     }

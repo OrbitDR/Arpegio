@@ -473,6 +473,15 @@ std::vector<DeviceInfo> list_wasapi_devices(OutputKind kind) {
     return devices;
 }
 
+double current_hardware_gain_db(const DeviceInfo& device) {
+    if (device.kind == OutputKind::Asio || device.id.empty()) return device.hardware_gain_db;
+    try {
+        return read_hardware_gain_db(find_device(device.id).Get());
+    } catch (const std::runtime_error&) {
+        return device.hardware_gain_db;  // the open that follows reports what is wrong
+    }
+}
+
 std::unique_ptr<Output> make_wasapi_output(const DeviceInfo& device, const OutputOptions& options) {
     return std::make_unique<WasapiOutput>(device, options);
 }

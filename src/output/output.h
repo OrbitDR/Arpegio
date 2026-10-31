@@ -99,6 +99,10 @@ public:
 std::vector<DeviceInfo> list_asio_devices();
 std::vector<DeviceInfo> list_wasapi_devices(OutputKind kind);  // call from an MTA thread
 
+// What a device's Windows volume is right now, which can differ from when it was listed. Call from an
+// MTA thread.
+double current_hardware_gain_db(const DeviceInfo& device);
+
 std::unique_ptr<Output> make_output(const DeviceInfo& device, const OutputOptions& options = {});
 
 }  // namespace arpegio
