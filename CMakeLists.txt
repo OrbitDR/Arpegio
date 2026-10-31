@@ -33,6 +33,26 @@ set(OGG_LIBRARY ogg CACHE STRING "" FORCE)
 add_subdirectory(third_party/vorbis EXCLUDE_FROM_ALL)
 add_subdirectory(third_party/wavpack EXCLUDE_FROM_ALL)
 
+set(BUILD_BINDINGS OFF CACHE BOOL "" FORCE)
+set(WITH_MATROSKA OFF CACHE BOOL "" FORCE)
+set(WITH_MOD OFF CACHE BOOL "" FORCE)
+set(WITH_SHORTEN OFF CACHE BOOL "" FORCE)
+set(WITH_TRUEAUDIO OFF CACHE BOOL "" FORCE)
+set(WITH_ZLIB OFF CACHE BOOL "" FORCE)
+set(utf8cpp_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/utfcpp/source" CACHE PATH "" FORCE)
+add_subdirectory(third_party/taglib EXCLUDE_FROM_ALL)
+# TagLib publishes its headers only on install, so the tree is listed here.
+set(TAGLIB_INCLUDE_DIRS
+    third_party/taglib/taglib
+    third_party/taglib/taglib/toolkit
+    third_party/taglib/taglib/mp4
+    ${CMAKE_CURRENT_BINARY_DIR}/third_party/taglib)
+
+add_library(sqlite3 STATIC EXCLUDE_FROM_ALL third_party/sqlite/sqlite3.c)
+target_include_directories(sqlite3 SYSTEM INTERFACE third_party/sqlite)
+target_compile_definitions(sqlite3 PRIVATE SQLITE_ENABLE_FTS5 SQLITE_DQS=0 SQLITE_OMIT_DEPRECATED)
+target_compile_options(sqlite3 PRIVATE /w)
+
 set(MAC_ROOT third_party/monkeysaudio/Source)
 add_library(monkeysaudio STATIC EXCLUDE_FROM_ALL
     ${MAC_ROOT}/Shared/BufferIO.cpp
@@ -104,6 +124,7 @@ add_library(arpegio_core STATIC
     src/decode/dsf_decoder.cpp
     src/decode/dff_decoder.cpp
     src/decode/framed_dsd.cpp
+    src/decode/range_decoder.cpp
     src/decode/sacd_iso.cpp
     src/decode/wav_decoder.cpp
     src/decode/aiff_decoder.cpp
@@ -120,12 +141,22 @@ add_library(arpegio_core STATIC
     src/output/sta_thread.cpp
     src/output/asio_output.cpp
     src/output/wasapi_output.cpp
+    src/library/paths.cpp
+    src/library/database.cpp
+    src/library/library_store.cpp
+    src/library/cue_sheet.cpp
+    src/library/metadata.cpp
+    src/library/artwork.cpp
+    src/library/scanner.cpp
+    src/library/track_source.cpp
+    src/library/folder_watcher.cpp
+    src/library/library.cpp
 )
 target_include_directories(arpegio_core PUBLIC src)
-target_include_directories(arpegio_core SYSTEM PRIVATE third_party/asiosdk/common third_party/r8brain third_party/minimp3)
+target_include_directories(arpegio_core SYSTEM PRIVATE third_party/asiosdk/common third_party/r8brain third_party/minimp3 ${TAGLIB_INCLUDE_DIRS})
 target_link_libraries(arpegio_core
-    PUBLIC avrt ole32 advapi32 user32 uuid mfplat mfreadwrite mfuuid propsys shlwapi
-    PRIVATE FLAC vorbisfile vorbis wavpack monkeysaudio)
+    PUBLIC avrt ole32 advapi32 user32 uuid mfplat mfreadwrite mfuuid propsys shlwapi windowscodecs
+    PRIVATE FLAC vorbisfile vorbis wavpack monkeysaudio sqlite3 tag)
 
 add_executable(arpegio-cli cli/main.cpp)
 target_link_libraries(arpegio-cli PRIVATE arpegio_core)
@@ -142,6 +173,9 @@ target_link_libraries(arpegio-fir-report PRIVATE arpegio_core)
 add_executable(arpegio-sacd tools/sacd_info.cpp)
 target_link_libraries(arpegio-sacd PRIVATE arpegio_core)
 
+add_executable(arpegio-library tools/library_tool.cpp)
+target_link_libraries(arpegio-library PRIVATE arpegio_core)
+
 enable_testing()
 add_executable(arpegio-tests
     tests/test_main.cpp
@@ -150,6 +184,8 @@ add_executable(arpegio-tests
     tests/test_quantizer.cpp
     tests/test_render_plan.cpp
     tests/test_player.cpp
+    tests/test_library.cpp
 )
-target_link_libraries(arpegio-tests PRIVATE arpegio_core)
+target_include_directories(arpegio-tests SYSTEM PRIVATE ${TAGLIB_INCLUDE_DIRS})
+target_link_libraries(arpegio-tests PRIVATE arpegio_core tag FLAC)
 add_test(NAME arpegio-tests COMMAND arpegio-tests)

@@ -12,8 +12,8 @@ Las descarga `scripts/fetch_deps.py`, con versión y SHA-256 fijos. No se versio
 | Monkey's Audio SDK 13.45 | Decodificación | BSD |
 | minimp3 | Decodificación | CC0 |
 | nlohmann json 3.12.0 | Interfaz, aún sin usar | MIT |
-| SQLite 3.54.1 | Biblioteca, aún sin usar | Dominio público |
-| TagLib 2.3.2, utfcpp 4.2.1 | Biblioteca, aún sin usar | LGPL 2.1 o MPL 1.1; Boost |
+| SQLite 3.54.1 | Biblioteca, con FTS5 | Dominio público |
+| TagLib 2.3.2, utfcpp 4.2.1 | Etiquetas y portadas incrustadas | LGPL 2.1 o MPL 1.1; Boost |
 | WebView2 SDK 1.0.4314.35 | Interfaz, aún sin usar | BSD, de Microsoft |
 
 `src/dsd/dst_decoder.cpp` deriva de FFmpeg (LGPL 2.1 o posterior). `src/decode/sacd_iso.cpp` sigue las estructuras de SACD Ripper (GPL 2 o posterior) y foo_input_sacd (LGPL 2.1 o posterior). Las tres licencias son compatibles con GPLv3.

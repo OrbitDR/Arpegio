@@ -2,7 +2,7 @@
 
 Reproductor de música para Windows x64 centrado en la calidad de audio: PCM bit-perfect, DSD nativo por ASIO, DoP y conversión de DSD a PCM. El nombre es provisional.
 
-Estado: motor y línea de comandos funcionando. La biblioteca y la interfaz aún no existen. Para retomar el desarrollo, ver [docs/PROGRESS.md](docs/PROGRESS.md). El diseño está en [docs/DESIGN.md](docs/DESIGN.md).
+Estado: motor, biblioteca y línea de comandos funcionando. La interfaz aún no existe. Para retomar el desarrollo, ver [docs/PROGRESS.md](docs/PROGRESS.md). El diseño está en [docs/DESIGN.md](docs/DESIGN.md).
 
 ## Compilar
 
@@ -24,6 +24,15 @@ cd build\release
 ```
 
 `--output` acepta `asio`, `exclusive` o `shared`. `--device` busca por parte del nombre. `--dsd` acepta `auto`, `native`, `dop` o `pcm`.
+
+La biblioteca se prueba con `arpegio-library`, que nunca escribe en la carpeta de música:
+
+```powershell
+.\arpegio-library.exe biblioteca.db scan "D:\Música"
+.\arpegio-library.exe biblioteca.db stats
+.\arpegio-library.exe biblioteca.db search "texto"
+.\arpegio-library.exe biblioteca.db verify
+```
 
 ## Licencia
 
