@@ -32,8 +32,10 @@ Decoder ──> Pipeline ──> RingBuffer ──> FrameSource::pull ──> Ou
 Orden automático:
 
 1. Nativo, solo por ASIO y si el driver lo declara con `kAsioCanDoIoFormat`.
-2. DoP, por ASIO o WASAPI exclusivo, si el usuario confirmó que su DAC lo entiende. Ni ASIO ni WASAPI permiten detectarlo.
+2. DoP, por ASIO o WASAPI exclusivo, si el usuario confirmó que su DAC lo entiende. Ni ASIO ni WASAPI permiten detectarlo. Por WASAPI exige además que el volumen de hardware esté en 0 dB.
 3. Conversión a PCM. WASAPI compartido siempre usa esta ruta.
+
+El volumen de hardware del endpoint llega a las muestras incluso en modo exclusivo. En el Topping DX1 II, a −4 dB el DAC deja de reconocer DoP y lo reproduce como PCM, con un ruido bajo. Por eso cualquier valor distinto de 0 dB también impide declarar bit-perfect una salida WASAPI. La escucha debe hacerse con Windows al 100 % y el volumen físico del DAC.
 
 | Origen | PCM preferido | División | Corte −3 dB | Si el DAC no llega |
 |---|---|---|---|---|
@@ -67,6 +69,36 @@ DST es un port de `dstdec.c` de FFmpeg. FFmpeg no se usa como dependencia: la ve
 
 MQA queda fuera porque es propietario y requiere licencia.
 
+Un archivo se identifica por su contenido antes que por su extensión. Dos casos reales de la colección obligan a mirar más allá del byte 0:
+
+- Etiquetas ID3v2 delante de un FLAC: el formato real se busca detrás de la etiqueta.
+- Híbridos `.iso.wv`: una imagen ISO 9660 cuya carga es WavPack. Con esa extensión se entregan a libwavpack, que encuentra el flujo por sí mismo.
+
+## Biblioteca
+
+Código en `src/library/`. La aplicación usa `Library`; lo demás son sus piezas.
+
+```
+FolderWatcher ──> Library ──> hilo de escaneo ──> scan_folder ──> LibraryStore ──> SQLite
+                     │                                 │
+                     └ store(): lectura en otro hilo   └ metadata (TagLib), artwork (WIC), cue_sheet
+```
+
+- **Solo lectura sobre la música.** TagLib abre un flujo de solo lectura, así que escanear no puede modificar ningún archivo. Base de datos y portadas viven aparte.
+- **Una conexión por hilo, en modo WAL.** Los archivos se leen fuera de cualquier transacción y se escriben por lotes de 128 pistas, de modo que navegar sigue fluido durante un escaneo.
+- **Escaneo incremental.** Un archivo sin cambios de tamaño y fecha no se vuelve a leer. Una hoja CUE se relee si cambia ella o cualquiera de sus archivos de audio.
+- **Una carpeta inaccesible no borra nada.** Si la carpeta no se puede listar, el escaneo falla sin tocar el catálogo, para que un disco desconectado no parezca una biblioteca eliminada. Un escaneo cancelado conserva lo escrito y no elimina nada.
+- **Identidad de pista: carpeta, ruta y parte.** La parte es 0 para un archivo entero, y el número de pista para CUE y SACD. Así una pista conserva su id, y con él favoritos y listas, al reescanear.
+- **Identidad de álbum: título y carpeta.** Ni el año ni el artista sirven: varían entre las pistas de un recopilatorio, y un artista puede tener varios discos homónimos. Las subcarpetas `CD1`, `Disc 2` y similares cuentan como su carpeta padre. Dos ediciones de un disco en carpetas distintas son dos álbumes.
+- **Crédito del álbum: mayoría.** Es el artista que las etiquetas nombran en más de la mitad de las pistas; si ninguno llega, `Various Artists`. El año es el más reciente de sus pistas. La portada, la de la primera pista que tenga.
+- **Rangos CUE en unidades del decodificador.** Frames, o bytes por canal en DSD. `make_range_decoder` presenta el trozo como una fuente más, y dos pistas contiguas del mismo formato siguen en el mismo anillo sin hueco.
+- **Hojas CUE tolerantes.** El nombre de `FILE` puede ser el `.wav` original aunque el archivo sea ya `.flac`, o el temporal del ripeador. Si dos hojas cubren un audio, gana la primera por ruta. También se lee la hoja incrustada en la etiqueta `CUESHEET`. Se aceptan tiempos con más de 74 frames, porque rechazar la hoja deja el álbum como una sola pista.
+- **SACD.** Una pista por entrada de la tabla de contenidos. Se cataloga el área estéreo salvo que `ScanOptions::sacd_multichannel` pida la multicanal. Un `.iso` que no sea SACD se ignora.
+- **Búsqueda con FTS5.** `rowid` es el id de pista y un disparador borra sus filas, incluso en borrados en cascada. Ignora acentos y busca por prefijo. Lo que el tokenizador descarta, como el título `÷`, cae en `LIKE`.
+- **Portadas con Windows Imaging Component,** sin dependencias. Original y miniatura JPEG de 512 px, direccionados por contenido. Orden: imagen incrustada, nombre habitual en la carpeta, imagen única en la carpeta, y lo mismo en subcarpetas como `Covers` o `Artwork`. Con varias imágenes sin nombre reconocible no se adivina.
+- **Carpetas vigiladas.** `ReadDirectoryChangesW`, con 2 s de calma antes de reescanear, para que copiar un álbum dé un solo escaneo y no se lean archivos a medio escribir.
+- **Carpetas solapadas rechazadas.** Una carpeta dentro de otra listaría los mismos archivos dos veces.
+
 ## Verificación hecha el 2026-10-30
 
 - 41 pruebas automáticas, sin fallos en ejecuciones repetidas. Cubren gapless exacto, seek, DSD nativo intacto y DoP continuo.
@@ -76,7 +108,20 @@ MQA queda fuera porque es propietario y requiere licencia.
 - Topping por WASAPI exclusivo: 44.1, 176.4 y 352.8 kHz sin eventos tardíos, hueco máximo de 42 ms con periodo de 40 ms.
 - Topping por ASIO: PCM, DSD64, DSD128 y DSD256 nativos, y DoP, sin eventos tardíos ni cortes.
 
-Estas pruebas en el Topping usaron silencio o señal inaudible. **Falta la escucha con música real.**
+Estas pruebas en el Topping usaron silencio o señal inaudible. La escucha con música real se hizo el 2026-10-31 y sus resultados están en [PROGRESS.md](PROGRESS.md#prueba-de-escucha).
+
+## Verificación de la biblioteca, 2026-10-31
+
+Sobre `D:\Música`, con la colección en el estado de ese día:
+
+- 4 280 archivos dan 5 184 pistas, 476 álbumes y 382 artistas, 353.9 horas. Ningún archivo de la colección cambió.
+- Escaneo completo en 13.4 s con la caché del sistema caliente, y 0.06 s si nada cambió.
+- `arpegio-library verify` abre las 5 184 pistas y lee al principio, en medio y al final de cada una, sin fallos. Incluye 1 239 pistas CUE y 110 SACD.
+- 954 pistas CUE empiezan en su muestra exacta, comparadas con una lectura secuencial del archivo: 870 en FLAC, 57 en WavPack, 18 en APE y 9 en DSF.
+- `PRAGMA integrity_check` y `foreign_key_check` limpios, con una fila de búsqueda por pista.
+- 4 992 pistas con portada. Los 24 álbumes sin ella son, sobre todo, carpetas sin imágenes o con varias sin nombre reconocible.
+
+AuroraPlayer daba 5 071 pistas, 485 álbumes y 739 artistas. Las diferencias son los híbridos `.iso.wv`, los FLAC y hojas CUE que antes fallaban, los compositores, que ya no cuentan como artistas, y los álbumes que antes se partían.
 
 ## Medición del filtro DSD frente al de FFmpeg
 
