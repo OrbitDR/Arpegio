@@ -99,6 +99,46 @@ FolderWatcher ──> Library ──> hilo de escaneo ──> scan_folder ──
 - **Carpetas vigiladas.** `ReadDirectoryChangesW`, con 2 s de calma antes de reescanear, para que copiar un álbum dé un solo escaneo y no se lean archivos a medio escribir.
 - **Carpetas solapadas rechazadas.** Una carpeta dentro de otra listaría los mismos archivos dos veces.
 
+## Interfaz
+
+Código en `src/app/` y `ui/`.
+
+```
+Página (ui/) <── JSON ──> MainWindow (WebView2) <──> Controller ──> Library, Player
+```
+
+- **Sin framework ni compilación web.** JavaScript en módulos que el navegador carga tal cual. Sin `node_modules`, un repositorio público no hereda dependencias de npm, y no hace falta Node para compilar.
+- **`Controller` no sabe qué es una ventana.** Recibe peticiones con nombre y devuelve JSON, y `tick()` emite lo que cambió. Por eso toda la aplicación corre en las pruebas con una salida simulada. `MainWindow` solo traduce entre eso y WebView2.
+- **El hilo de audio no se entera.** La interfaz lee `Player::status()` cinco veces por segundo. El callback sigue sin bloqueos, y no hay animaciones continuas: una página quieta no gasta CPU mientras suena la música.
+- **Páginas ligeras.** Las listas son virtuales, y solo existen en la página las filas visibles, de modo que 5 000 pistas son unas 20 filas. Al minimizar, la página deja de dibujarse.
+- **El texto de los archivos no es HTML.** Títulos y rutas entran como nodos de texto, y la política de seguridad de la página solo permite sus propios scripts. Una etiqueta maliciosa no puede ejecutar nada. La página no puede navegar a otro sitio ni abrir ventanas.
+- **Primer arranque en WASAPI compartido sobre la salida predeterminada de Windows.** No quita el dispositivo a otros programas y respeta el volumen del sistema. Si la salida elegida desaparece, no se salta a otra: la música podría salir por otros altavoces a todo volumen.
+- **Una sola copia por carpeta de datos.** Dos procesos competirían por el catálogo y por el dispositivo.
+- **Listar dispositivos es lento y delicado.** Ocurre en un hilo MTA propio al arrancar, y se rechaza mientras suena porque cargar otra copia de un driver ASIO en uso puede tumbarlo. Si se pide reproducir antes de saber qué dispositivos hay, la petición espera.
+- **Los saltos no reabren el dispositivo.** `play`, `next`, `previous` y `seek` vacían el anillo y siguen en el mismo flujo si el formato coincide. Un DAC no tiene que volver a sincronizarse, y el salto tarda unos 200 ms.
+- **El anillo va por delante de lo que se oye.** A 44.1 kHz son hasta 90 s. Por eso `Player` distingue la pista que se decodifica de la que se oye: `seek` actúa sobre la segunda, y una edición de la cola que afecte a lo ya decodificado rellena el anillo desde la posición actual.
+- **Nombres en español solo al mostrar.** El catálogo guarda `Various Artists`, y `Controller` lo traduce al enviarlo a la página.
+
+## Verificación de la interfaz, 2026-10-31
+
+Sobre la aplicación real, con la colección real catalogada en una carpeta temporal y silencio digital. Lo reproduce `tools\ui\run.ps1`.
+
+| Ruta en el Topping | Resultado | Cortes y tardíos |
+|---|---|---|
+| WASAPI compartido, 48 kHz | Procesado | 0 |
+| WASAPI exclusivo, 44.1 y 96 kHz | Bit-perfect | 0 |
+| ASIO, DSD64 nativo | Bit-perfect | 0 |
+| ASIO, DoP | Bit-perfect | 0 |
+| ASIO, DSD a PCM a 176.4 kHz | Procesado | 0 |
+
+- Cambiar de salida mientras suena conserva pista y posición.
+- `next` tarda 224 ms sin reabrir el dispositivo.
+- La cola, la posición, la salida y las listas vuelven tras reiniciar, sin que empiece a sonar nada.
+- Coste de toda la aplicación, WebView2 incluido, con una pista de 24/96 sonando: menos del 3 % de un núcleo, un 0.15 % de la máquina. Memoria: unos 420 MB.
+- Cierre limpio en unos 100 ms con el código de salida 0.
+
+El aviso de volumen de Windows no se vio en pantalla, porque el Topping está al 100 %.
+
 ## Verificación hecha el 2026-10-30
 
 - 41 pruebas automáticas, sin fallos en ejecuciones repetidas. Cubren gapless exacto, seek, DSD nativo intacto y DoP continuo.

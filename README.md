@@ -2,11 +2,11 @@
 
 Reproductor de música para Windows x64 centrado en la calidad de audio: PCM bit-perfect, DSD nativo por ASIO, DoP y conversión de DSD a PCM. El nombre es provisional.
 
-Estado: motor, biblioteca y línea de comandos funcionando. La interfaz aún no existe. Para retomar el desarrollo, ver [docs/PROGRESS.md](docs/PROGRESS.md). El diseño está en [docs/DESIGN.md](docs/DESIGN.md).
+Estado: aplicación completa de escritorio, con biblioteca, cola y ajustes por dispositivo. Para retomar el desarrollo, ver [docs/PROGRESS.md](docs/PROGRESS.md). El diseño está en [docs/DESIGN.md](docs/DESIGN.md).
 
 ## Compilar
 
-Requiere Visual Studio Build Tools 2022, Windows SDK, CMake, Ninja y Python.
+Requiere Visual Studio Build Tools 2022, Windows SDK, CMake, Ninja y Python. Para ejecutarlo hace falta WebView2 Runtime, que Windows 11 ya incluye.
 
 ```powershell
 python scripts\fetch_deps.py
@@ -14,6 +14,20 @@ scripts\build.bat release test
 ```
 
 ## Usar
+
+La aplicación es `build\release\arpegio.exe`. Guarda su catálogo y sus ajustes en `%LOCALAPPDATA%\Arpegio`, y solo lee la música.
+
+En Ajustes se elige la salida. Por defecto usa WASAPI compartido, que no es bit-perfect. No hay volumen por software, así que el volumen se ajusta en el DAC, y con WASAPI conviene tener el de Windows al 100 %.
+
+| Teclas | Acción |
+|---|---|
+| Espacio | Reproducir o pausar |
+| Ctrl+Izquierda, Ctrl+Derecha | Pista anterior o siguiente |
+| Mayús+Izquierda, Mayús+Derecha | Retroceder o avanzar 10 s |
+| Ctrl+F | Buscar |
+| Alt+Izquierda, Alt+Derecha | Atrás o adelante en las vistas |
+
+También hay una línea de comandos:
 
 ```powershell
 cd build\release

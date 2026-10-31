@@ -4,7 +4,7 @@ Punto de partida para retomar el desarrollo. Última sesión: 2026-10-31. El dis
 
 ## Dónde estamos
 
-El motor de audio y la biblioteca funcionan desde línea de comandos con todos los formatos, y la escucha real pasó en todas las rutas. Falta la interfaz.
+La aplicación `arpegio.exe` funciona de punta a punta: biblioteca, cola, reproducción y ajustes por dispositivo, con la colección real y por las salidas reales. Toda la verificación de la interfaz se hizo con silencio digital, así que falta que el usuario la escuche con música.
 
 | Fase | Estado |
 |---|---|
@@ -12,8 +12,8 @@ El motor de audio y la biblioteca funcionan desde línea de comandos con todos l
 | 2. Motor PCM: WASAPI, ASIO, gapless, seek, pausa | Hecha |
 | 3. DSD: DSF, DFF, SACD ISO, DST, nativo, DoP, conversión | Hecha |
 | 4. Biblioteca | Hecha |
-| 5. Interfaz en WebView2 | **Siguiente** |
-| 6. Cierre | Sin empezar |
+| 5. Interfaz en WebView2 | Hecha, pendiente de escucha |
+| 6. Cierre | **Siguiente** |
 
 El repositorio está en la rama `main` y se publica como repositorio público de GitHub. La identidad de git está configurada únicamente para este repositorio, con el correo `noreply` de GitHub. El usuario dejó el control de versiones a criterio del asistente.
 
@@ -21,8 +21,7 @@ Como es público, ningún archivo ni mensaje de commit debe llevar rutas persona
 
 ## Cómo retomar
 
-1. Confirmar la [decisión pendiente](#decisión-pendiente) sobre la interfaz.
-2. Compilar y probar:
+1. Compilar y probar:
 
    ```powershell
    cd arpegio
@@ -30,11 +29,8 @@ Como es público, ningún archivo ni mensaje de commit debe llevar rutas persona
    scripts\build.bat release test
    ```
 
-3. Seguir con la interfaz.
-
-## Decisión pendiente
-
-Se recomendó WebView2 sin saber que `AuroraPlayer` ya tenía una interfaz Qt/QML aprobada por el usuario. El usuario debe decir si sigue con WebView2 o reutiliza esa interfaz. La elección cambia cuánto trabajo queda, no la calidad de audio. Si no responde, se sigue con WebView2, que fue la opción que eligió.
+2. Abrir `build\release\arpegio.exe`. Sus datos están en `%LOCALAPPDATA%\Arpegio`.
+3. Seguir con el [cierre](#cierre).
 
 ## Prueba de escucha
 
@@ -107,7 +103,8 @@ Segunda tanda el mismo día, con Windows al 100 %. Las 14 pruebas sonaron bien, 
 
 Los detalles y cifras están en [DESIGN.md](DESIGN.md#verificación-hecha-el-2026-10-30).
 
-- 88 pruebas automáticas sin fallos. La suite de 86 pasó 25 ejecuciones seguidas, y cinco fallos introducidos a propósito en la biblioteca fueron detectados.
+- 121 pruebas automáticas sin fallos, también en 12 ejecuciones seguidas con la CPU al 100 %. Diez fallos introducidos a propósito en el motor y cinco en la biblioteca fueron detectados.
+- Aplicación real con la colección real y silencio digital: `tools\ui\run.ps1` hace más de 50 comprobaciones sobre la ventana, sin errores de consola. Ver [Interfaz](DESIGN.md#verificación-de-la-interfaz-2026-10-31).
 - `LOOPBACK` del MiniFuse: coincidencia total a 24 bits en 44.1, 96 y 192 kHz.
 - 11 FLAC reales coinciden con su MD5.
 - DST idéntico a `libdstdec` en 18 000 frames, en 2 y 6 canales.
@@ -119,9 +116,11 @@ Los detalles y cifras están en [DESIGN.md](DESIGN.md#verificación-hecha-el-202
 
 ## Implementado pero sin verificar
 
+- **Interfaz con música real.** Todas las rutas se recorrieron con silencio digital y señal inaudible. Falta escuchar seek, siguiente, anterior y cambio de salida con música, por si hay clics.
+- Reordenar la cola arrastrando: probado con eventos simulados, no con el ratón.
 - Paso sin hueco: pasó de oído en SACD, CUE y archivos separados, sin comparar la salida real muestra a muestra.
 - DoP por ASIO con el volumen de Windows bajo: ASIO no consulta ese volumen, y no se sabe si le afecta.
-- Aviso de volumen: la lógica está cubierta por pruebas, pero no se vio en pantalla con el Topping por debajo del 100 %. Se lee al listar dispositivos, no durante la reproducción.
+- Aviso de volumen: la lógica está cubierta por pruebas, pero no se vio en pantalla con el Topping por debajo del 100 %. Se lee al listar dispositivos y al empezar a reproducir, no durante la reproducción.
 - Reapertura tras un reset de ASIO o una desconexión USB (`reopen_output_if_needed`).
 - DFF con DST y WavPack con DSD: no hay archivos así en la colección.
 - AIFF y Ogg Vorbis: no hay archivos en `D:\Música`, aunque sí en otras carpetas del equipo.
@@ -139,10 +138,10 @@ Una ejecución de `arpegio-library verify` sobre el catálogo multicanal se qued
 ## Limitaciones actuales del motor
 
 - No hay volumen por software ni ReplayGain.
-- `Player` reproduce por índice de cola, pero aún no tiene `next` ni `previous`.
-- Periodo WASAPI de 40 ms y búfer ASIO preferido del driver, solo ajustables por línea de comandos.
-- DoP automático depende de `--dop-confirmed`. Falta la prueba guiada y guardar ajustes por dispositivo.
-- La precarga en RAM es el anillo: 20 s del formato de salida, con un mínimo de 32 MB.
+- DoP automático depende de que el usuario lo confirme en Ajustes. Falta la prueba guiada.
+- La precarga en RAM es el anillo: 20 s del formato de salida, con un mínimo de 32 MB, que a 44.1 kHz son unos 90 s.
+- Editar la cola en los tramos que el anillo ya contiene provoca un hueco breve, porque el anillo se rellena desde lo que se oye. Añadir al final no lo provoca.
+- Cambiar de dispositivo o sus ajustes reinicia el flujo en la misma posición, con un hueco breve.
 
 ## Limitaciones actuales de la biblioteca
 
@@ -154,26 +153,23 @@ Una ejecución de `arpegio-library verify` sobre el catálogo multicanal se qued
 - Las pistas sin etiquetas quedan como `Unknown Artist`: 93 en la colección. El nombre del archivo no se interpreta.
 - `Library::remove_folder` es asíncrono: volver a añadir la misma carpeta antes de que termine da error de solapamiento.
 
+## Limitaciones actuales de la interfaz
+
+- Solo tema oscuro y solo español. Los mensajes de error poco habituales del motor llegan en inglés.
+- Sin selección múltiple de pistas.
+- La cola no se refresca si un reescaneo cambia las etiquetas de una pista que ya está en ella.
+- Sin controles de Windows en la pantalla de bloqueo ni en la miniatura de la barra de tareas. Las teclas multimedia sí funcionan, salvo que otro programa las tenga reservadas.
+- Actualizar la lista de dispositivos exige parar la música: cargar otra copia de un driver ASIO en uso puede tumbarlo.
+- Sin arrastrar archivos desde el Explorador.
+- WebView2 ocupa unos 420 MB de memoria en 7 procesos.
+
 ## Siguiente trabajo
-
-### Interfaz en WebView2
-
-- Ejecutable propio en `src/app/`: ventana Win32 y WebView2, con `wrl.h` y sin ATL.
-- Web en `ui/`, servida con `SetVirtualHostNameToFolderMapping`. Elegir framework al empezar.
-- Mensajes JSON con nlohmann json por `PostWebMessageAsJson` y `WebMessageReceived`.
-- Carátulas por `WebResourceRequested`.
-- Estado desde `Player::status()`, consultado de 5 a 10 veces por segundo.
-- Biblioteca con `Library`: `store()` para leer, `add_folder`, `remove_folder`, `rescan` y `status()`. `status().revision` crece cuando hay que refrescar las vistas. `make_queue_item` convierte una `Track` en un elemento de la cola, sea archivo, CUE o SACD. Las miniaturas salen de `artwork().thumbnail_path`.
-- `Player` necesita `next` y `previous`, y la cola guardada con `set_queue` y `queue` debe restaurarse al arrancar.
-- La base de datos y la caché de portadas deben ir en `%LOCALAPPDATA%\Arpegio`.
-- Vistas: artistas, álbumes, carpetas, pistas, cola, reproducción con ruta de señal, y ajustes por dispositivo.
-
-Si el usuario prefiere Qt, se reutiliza `src/ui/` de AuroraPlayer y se cambia `AudioEngine` por `Player` en `PlaybackController`.
 
 ### Cierre
 
+- Escucha de la interfaz con música.
 - Prueba guiada de DoP con silencio DSD, mirando la pantalla del DAC.
-- Ajustes guardados por dispositivo.
+- Controles multimedia de Windows en la pantalla de bloqueo y en la barra de tareas.
 - Volumen por software y ReplayGain.
 - libsoxr como segunda opción de remuestreo. Ya está descargado.
 - Instalador.
@@ -190,9 +186,11 @@ Si el usuario prefiere Qt, se reutiliza `src/ui/` de AuroraPlayer y se cambia `A
 | `src/output/` | ASIO, WASAPI e hilo STA |
 | `src/formats/` | Lector DSF y escritor WAV |
 | `src/library/` | `library` coordina; `library_store` es el catálogo en SQLite; `scanner` lee las carpetas; `metadata`, `artwork` y `cue_sheet` son sus piezas; `track_source` conecta con el motor |
+| `src/app/` | `controller` es la aplicación, sin ventanas y por tanto comprobable; `main_window` es la ventana con WebView2; `settings` son los ajustes |
+| `ui/` | La página, en JavaScript sin dependencias. `store` guarda el estado, `router` las vistas, `views/` cada vista y `signal` la ruta de la señal |
 | `cli/` | `arpegio-cli` y `arpegio-dsd2wav` |
-| `tests/` | Pruebas automáticas, con una salida simulada en `test_player.cpp` y la biblioteca en `test_library.cpp` |
-| `tools/` | Generador DSD, informes, `arpegio-library` y `measure/` |
+| `tests/` | Pruebas automáticas, con salidas simuladas en `test_player.cpp` y `test_controller.cpp`, y la biblioteca en `test_library.cpp` |
+| `tools/` | Generador DSD, informes, `arpegio-library`, `measure/` y `ui/` |
 
 ## Reproducir las verificaciones
 
@@ -236,6 +234,14 @@ New-Item -ItemType Directory -Force (Split-Path $db)
 .\arpegio-library.exe $db scan "D:\Música" --multichannel --force
 ```
 
+Aplicación real, con silencio digital por las salidas reales. La carpeta de música solo se cataloga, y en una carpeta temporal:
+
+```powershell
+powershell -File tools\ui\run.ps1 -MusicFolder "D:\Música" -Device topping
+```
+
+Abre y cierra la ventana varias veces, minimiza, pulsa teclas multimedia y cambia el formato del DAC. Las capturas quedan en `%TEMP%\arpegio-ui-check\shots`. `tools\ui\check.mjs` sirve para escribir otras pruebas: controla la aplicación por el protocolo de DevTools de Chromium con `--devtools`.
+
 Señal inaudible para probar hardware: `arpegio-dsdgen` sin tonos, por ejemplo `.\arpegio-dsdgen.exe quiet64.dsf ntf64.txt 2822400 20`. Para otras tasas, generar antes el diseño con `design_ntf.py 128` o `256`.
 
 ## Entorno y trampas conocidas
@@ -246,6 +252,10 @@ Señal inaudible para probar hardware: `arpegio-dsdgen` sin tonos, por ejemplo `
 - `scripts\build.bat` imprime un aviso de `vswhere`. Es inofensivo.
 - Evitar parches largos de Python en línea desde Bash: se rompen. Es mejor escribir el script en un archivo.
 - La descarga del binario de FFmpeg fue bloqueada por el control de permisos. FFmpeg no hace falta y no se debe reintentar.
+- Los archivos de `ui/` se copian junto al ejecutable en cada compilación. Sin compilar, `arpegio.exe` sigue usando la copia anterior.
+- En JavaScript, `elemento.append(null)` escribe el texto «null». Los hijos condicionales van por `fill()` de `dom.js` o dentro de `h()`.
+- La salida simulada de las pruebas corre unas 40 veces más rápido que el tiempo real. Una prueba que mire un momento concreto de una pista debe pausar antes, o fallará con la máquina cargada.
+- Desde PowerShell, un `$null` pasado a `FindWindowW` llega como cadena vacía y no encuentra nada. Las pruebas de minimizar parecían pasar sin haber minimizado.
 - La colección real descubre lo que las pruebas sintéticas no: un `.flac` con ID3v2 delante cerraba el programa, y había híbridos `.iso.wv`, FLAC sin longitud en la cabecera y hojas con tiempos fuera de norma. Tras tocar decodificadores o escáner, repetir `scan` y `verify`.
 - Windows sella los archivos con un reloj de unos 15 ms. Una prueba que reescribe un archivo del mismo tamaño justo después de escanearlo debe mover la fecha a mano.
 - `third_party/` no se versiona. `scripts/fetch_deps.py` lo recrea con versiones y SHA-256 fijos.
