@@ -129,6 +129,7 @@ private:
     RepeatMode repeat_ = RepeatMode::Off;
     std::vector<QueueItem> queue_;
     size_t loader_index_ = 0;  // the track being decoded, which can be well ahead of the one being heard
+    double waiting_position_ = 0.0;  // what the position reads until the track is heard
     std::optional<Jump> play_request_;
     std::optional<Jump> jump_request_;
     bool quit_ = false;

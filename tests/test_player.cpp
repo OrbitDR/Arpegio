@@ -481,6 +481,20 @@ TEST(repeat_track_keeps_the_index_and_repeat_queue_wraps_around) {
     CHECK(f.player.wait_until_stopped(5000));
 }
 
+TEST(position_reads_the_start_point_before_the_first_sound) {
+    Fixture f;
+    f.player.set_queue({ramp(1, 96000 * 60)});
+    f.player.play(0, 25.0);
+    // The device has not produced anything yet, and the position must not fall back to zero meanwhile.
+    for (int i = 0; i < 200; ++i) {
+        const double position = f.player.status().position_seconds;
+        CHECK(position >= 25.0);
+        if (position < 25.0) break;
+    }
+    f.player.stop();
+    CHECK(f.player.wait_until_stopped(5000));
+}
+
 TEST(status_reports_the_plan_of_the_open_stream) {
     Fixture f;
     f.player.set_queue({ramp(1, 96000 * 8)});

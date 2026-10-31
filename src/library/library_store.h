@@ -39,6 +39,8 @@ struct FileStamp {
 struct Track {
     TrackId id = 0;
     FolderId folder_id = 0;
+    AlbumId album_id = 0;    // read only
+    ArtistId artist_id = 0;  // read only
     std::filesystem::path path;  // absolute
     std::string relative_path;   // to the folder, with forward slashes
     int part = 0;                // 0 for a whole file, otherwise its CUE or SACD track number
@@ -78,6 +80,12 @@ struct Album {
     int year = 0;
     ArtworkId artwork_id = 0;
     int track_count = 0;
+    double seconds = 0.0;
+    std::string codec;  // of its best track, like the three below
+    uint32_t rate = 0;
+    int bits = 0;
+    bool dsd = false;
+    double added_at = 0.0;  // seconds since 1970, of its newest track
 };
 
 struct Artist {
@@ -85,6 +93,7 @@ struct Artist {
     std::string name;
     int album_count = 0;  // albums credited to this artist
     int track_count = 0;  // tracks performed by this artist
+    ArtworkId artwork_id = 0;
 };
 
 struct Folder {
@@ -150,6 +159,7 @@ public:
 
     // Playlists
     PlaylistId create_playlist(std::string_view name);
+    void rename_playlist(PlaylistId id, std::string_view name);
     void delete_playlist(PlaylistId id);
     void add_to_playlist(PlaylistId id, TrackId track);
     void remove_from_playlist(PlaylistId id, size_t index);  // index in playlist_tracks()

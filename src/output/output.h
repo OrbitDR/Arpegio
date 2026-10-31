@@ -41,6 +41,7 @@ struct DeviceInfo {
     int buffer_max = 0;
     int buffer_preferred = 0;
     double hardware_gain_db = 0.0;  // Windows hardware volume of a WASAPI endpoint, 0 when neutral or unknown
+    bool is_default = false;        // the Windows default for music, WASAPI only
     std::string error;              // why the device could not be queried, empty when it could
 };
 

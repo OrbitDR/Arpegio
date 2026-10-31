@@ -149,7 +149,8 @@ constexpr const char* kTrackQuery = R"SQL(
            t.is_dsd, t.rate, t.channels, t.bits, t.length, t.bitrate, t.pre_emphasis,
            t.range_start, t.range_end, t.sacd_area, t.sacd_track,
            COALESCE(t.artwork_id, 0), COALESCE(al.artwork_id, 0),
-           EXISTS (SELECT 1 FROM favorites v WHERE v.track_id = t.track_id)
+           EXISTS (SELECT 1 FROM favorites v WHERE v.track_id = t.track_id),
+           t.album_id, t.artist_id
     FROM tracks t
     JOIN folders f ON f.folder_id = t.folder_id
     JOIN artists ar ON ar.artist_id = t.artist_id
@@ -159,9 +160,14 @@ constexpr const char* kTrackQuery = R"SQL(
 
 constexpr const char* kAlbumQuery = R"SQL(
     SELECT al.album_id, al.title, aa.name, al.year, COALESCE(al.artwork_id, 0),
-           (SELECT COUNT(*) FROM tracks t WHERE t.album_id = al.album_id)
+           s.tracks, s.seconds, s.added, b.codec, b.rate, b.bits, b.is_dsd
     FROM albums al
     JOIN artists aa ON aa.artist_id = al.album_artist_id
+    JOIN (SELECT album_id, COUNT(*) AS tracks, MAX(added_at) AS added,
+                 SUM(CASE WHEN rate = 0 THEN 0 WHEN is_dsd THEN length * 8.0 / rate ELSE length * 1.0 / rate END) AS seconds
+          FROM tracks GROUP BY album_id) s ON s.album_id = al.album_id
+    JOIN tracks b ON b.track_id = (SELECT t.track_id FROM tracks t WHERE t.album_id = al.album_id
+                                   ORDER BY t.is_dsd DESC, t.rate DESC, t.bits DESC LIMIT 1)
 )SQL";
 
 double now_seconds() {
@@ -452,6 +458,8 @@ std::vector<Track> LibraryStore::read_tracks(Statement& statement) {
         track.artwork_id = statement.integer(29);
         track.album_artwork_id = statement.integer(30);
         track.favorite = statement.integer(31) != 0;
+        track.album_id = statement.integer(32);
+        track.artist_id = statement.integer(33);
         out.push_back(std::move(track));
     }
     return out;
@@ -460,8 +468,20 @@ std::vector<Track> LibraryStore::read_tracks(Statement& statement) {
 std::vector<Album> LibraryStore::read_albums(Statement& statement) {
     std::vector<Album> out;
     while (statement.step()) {
-        out.push_back({statement.integer(0), statement.text(1), statement.text(2), static_cast<int>(statement.integer(3)),
-                       statement.integer(4), static_cast<int>(statement.integer(5))});
+        Album album;
+        album.id = statement.integer(0);
+        album.title = statement.text(1);
+        album.album_artist = statement.text(2);
+        album.year = static_cast<int>(statement.integer(3));
+        album.artwork_id = statement.integer(4);
+        album.track_count = static_cast<int>(statement.integer(5));
+        album.seconds = statement.real(6);
+        album.added_at = statement.real(7);
+        album.codec = statement.text(8);
+        album.rate = static_cast<uint32_t>(statement.integer(9));
+        album.bits = static_cast<int>(statement.integer(10));
+        album.dsd = statement.integer(11) != 0;
+        out.push_back(std::move(album));
     }
     return out;
 }
@@ -516,12 +536,16 @@ std::vector<Artist> LibraryStore::artists() {
     Statement statement = database_.prepare(R"SQL(
         SELECT ar.artist_id, ar.name,
                (SELECT COUNT(*) FROM albums al WHERE al.album_artist_id = ar.artist_id),
-               (SELECT COUNT(*) FROM tracks t WHERE t.artist_id = ar.artist_id)
+               (SELECT COUNT(*) FROM tracks t WHERE t.artist_id = ar.artist_id),
+               COALESCE((SELECT artwork_id FROM albums al WHERE al.album_artist_id = ar.artist_id
+                         AND artwork_id IS NOT NULL ORDER BY year DESC LIMIT 1),
+                        (SELECT artwork_id FROM tracks t WHERE t.artist_id = ar.artist_id
+                         AND artwork_id IS NOT NULL LIMIT 1), 0)
         FROM artists ar ORDER BY ar.name)SQL");
     std::vector<Artist> out;
     while (statement.step()) {
         out.push_back({statement.integer(0), statement.text(1), static_cast<int>(statement.integer(2)),
-                       static_cast<int>(statement.integer(3))});
+                       static_cast<int>(statement.integer(3)), statement.integer(4)});
     }
     return out;
 }
@@ -572,6 +596,10 @@ PlaylistId LibraryStore::create_playlist(std::string_view name) {
     return database_
         .query("INSERT INTO playlists(name, created_at, updated_at) VALUES (?, ?, ?) RETURNING playlist_id", name, now, now)
         .single();
+}
+
+void LibraryStore::rename_playlist(PlaylistId id, std::string_view name) {
+    database_.query("UPDATE playlists SET name = ?, updated_at = ? WHERE playlist_id = ?", name, now_seconds(), id).run();
 }
 
 void LibraryStore::delete_playlist(PlaylistId id) {

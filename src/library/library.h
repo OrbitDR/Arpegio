@@ -51,6 +51,9 @@ public:
     void remove_folder(const std::filesystem::path& folder);
     void rescan(bool force = false);
 
+    // Applies from the next scan on.
+    void set_options(const ScanOptions& options);
+
     LibraryStatus status() const;
     bool wait_until_idle(uint32_t timeout_ms);
 
@@ -69,10 +72,10 @@ private:
     LibraryStore store_;
     LibraryStore writer_;   // worker thread only
     ArtworkCache artwork_;  // written by the worker; its path lookups are safe from any thread
-    ScanOptions options_;
     uint32_t quiet_ms_;
 
     mutable std::mutex mutex_;
+    ScanOptions options_;   // guarded by mutex_
     std::condition_variable wake_;
     std::condition_variable idle_;
     std::deque<Job> jobs_;  // guarded by mutex_

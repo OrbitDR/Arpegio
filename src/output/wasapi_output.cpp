@@ -412,6 +412,16 @@ std::vector<DeviceInfo> list_wasapi_devices(OutputKind kind) {
     UINT count = 0;
     collection->GetCount(&count);
 
+    std::wstring default_id;
+    ComPtr<IMMDevice> default_device;
+    if (SUCCEEDED(enumerator->GetDefaultAudioEndpoint(eRender, eConsole, &default_device))) {
+        LPWSTR id = nullptr;
+        if (SUCCEEDED(default_device->GetId(&id))) {
+            default_id = id;
+            CoTaskMemFree(id);
+        }
+    }
+
     for (UINT index = 0; index < count; ++index) {
         ComPtr<IMMDevice> device;
         if (FAILED(collection->Item(index, &device))) continue;
@@ -421,6 +431,7 @@ std::vector<DeviceInfo> list_wasapi_devices(OutputKind kind) {
         LPWSTR id = nullptr;
         if (SUCCEEDED(device->GetId(&id))) {
             info.id = id;
+            info.is_default = info.id == default_id;
             CoTaskMemFree(id);
         }
         ComPtr<IPropertyStore> properties;

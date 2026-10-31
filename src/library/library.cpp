@@ -23,7 +23,7 @@ bool overlap(const std::wstring& a, const std::wstring& b) {
 
 Library::Library(const std::filesystem::path& database, const std::filesystem::path& cache, ScanOptions options,
                  uint32_t quiet_ms)
-    : store_(database), writer_(database), artwork_(cache), options_(options), quiet_ms_(quiet_ms) {
+    : store_(database), writer_(database), artwork_(cache), quiet_ms_(quiet_ms), options_(options) {
     const std::vector<Folder> folders = store_.folders();
     thread_ = std::thread([this] { worker(); });
     for (const Folder& folder : folders) {
@@ -83,6 +83,11 @@ void Library::remove_folder(const std::filesystem::path& folder) {
 
 void Library::rescan(bool force) {
     for (const Folder& folder : store_.folders()) enqueue_scan(folder.path, force);
+}
+
+void Library::set_options(const ScanOptions& options) {
+    std::lock_guard lock(mutex_);
+    options_ = options;
 }
 
 void Library::enqueue_scan(const std::filesystem::path& folder, bool force) {
@@ -148,7 +153,11 @@ void Library::run_job(const Job& job) {
         if (job.remove) {
             writer_.remove_folder(job.folder);
         } else {
-            ScanOptions options = options_;
+            ScanOptions options;
+            {
+                std::lock_guard lock(mutex_);
+                options = options_;
+            }
             options.force = job.force;
             const ScanProgress progress = [this](uint64_t done, uint64_t total, const std::string& path) {
                 std::lock_guard lock(mutex_);

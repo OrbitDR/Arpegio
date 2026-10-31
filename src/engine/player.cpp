@@ -167,6 +167,7 @@ void Player::play(size_t index, double start_seconds) {
         jump_request_.reset();
         play_request_ = Jump{index, start_seconds};
         loader_index_ = index;
+        waiting_position_ = start_seconds;
         active_ = true;
     }
     wake_.notify_all();
@@ -213,6 +214,7 @@ PlayerStatus Player::status() const {
     status.bit_perfect = bit_perfect_;
     status.hardware_gain_db = hardware_gain_db_;
     status.queue_index = heard_index();
+    if (active_) status.position_seconds = heard_position();
     status.clipped_samples = clipped_.load(std::memory_order_relaxed);
     status.reopened = reopened_.load(std::memory_order_relaxed);
     status.underruns = last_underruns_;
@@ -225,10 +227,8 @@ PlayerStatus Player::status() const {
     status.stream_open = true;
     status.plan = plan_;
 
-    if (const Segment* current = heard_segment()) {
-        status.duration_seconds = current->duration_seconds;
-        status.position_seconds = heard_position();
-    }
+    status.position_seconds = heard_position();
+    if (const Segment* current = heard_segment()) status.duration_seconds = current->duration_seconds;
     return status;
 }
 
@@ -250,7 +250,7 @@ size_t Player::heard_index() const {
 
 double Player::heard_position() const {
     const Segment* current = heard_segment();
-    if (!current) return 0.0;
+    if (!current) return waiting_position_;
     return current->start_seconds + static_cast<double>(session_->ring.total_read() - current->ring_position) /
                                         (plan_.device.frame_bytes() * plan_.device.ring_frame_rate());
 }
@@ -366,6 +366,7 @@ std::optional<double> Player::take_jump() {
     if (!jump_request_) return std::nullopt;
     const double seconds = jump_request_->seconds;
     loader_index_ = jump_request_->index;
+    waiting_position_ = seconds;
     jump_request_.reset();
     if (session_) {
         session_->refilling.store(true, std::memory_order_release);
@@ -504,6 +505,10 @@ void Player::run_queue(double start_seconds) {
         }
         if (!session_) open_session(plan, source);
 
+        {
+            std::lock_guard lock(mutex_);
+            waiting_position_ = start.value_or(0.0);
+        }
         add_segment(index, 0.0, source.seconds());
         const PumpResult result = pump(*decoder, source, start);
         if (result == PumpResult::Stop) return;
