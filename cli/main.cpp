@@ -15,6 +15,8 @@
 #include "audio/quantizer.h"
 #include "decode/sacd_iso.h"
 #include "engine/player.h"
+#include "library/library_store.h"
+#include "library/track_source.h"
 #include "output/output.h"
 
 using namespace arpegio;
@@ -89,7 +91,8 @@ int usage() {
           "       arpegio-cli play FILE... --output asio|exclusive|shared --device TEXT\n"
           "                   [--dsd auto|native|dop|pcm] [--dop-confirmed] [--gain-db DB]\n"
           "                   [--first-channel N] [--period-ms N] [--buffer N] [--wire s32-24|s24]\n"
-          "                   [--start SECONDS] [--seconds SECONDS] [--track N] [--multichannel]\n"
+          "                   [--start SECONDS] [--last SECONDS] [--seconds SECONDS] [--track N] [--multichannel]\n"
+          "       arpegio-cli play --db DB --album ID [--from N] [same options as above]\n"
           "       arpegio-cli decode FILE [OUT.raw] [--seconds S]\n"
           "       arpegio-cli loopback FILE --device TEXT --first-channel N --capture-channel N\n",
           stderr);
@@ -107,6 +110,10 @@ int play(int argc, wchar_t** argv) {
     int sacd_track = 0;
     bool multichannel = false;
     std::wstring wire;
+    std::filesystem::path database;
+    int64_t album = 0;
+    size_t first = 0;
+    double last = 0.0;
 
     for (int i = 2; i < argc; ++i) {
         const std::wstring arg = argv[i];
@@ -142,6 +149,14 @@ int play(int argc, wchar_t** argv) {
             multichannel = true;
         } else if (arg == L"--wire" && has_value) {
             wire = argv[++i];
+        } else if (arg == L"--db" && has_value) {
+            database = argv[++i];
+        } else if (arg == L"--album" && has_value) {
+            album = _wtoi64(argv[++i]);
+        } else if (arg == L"--from" && has_value) {
+            first = wcstoul(argv[++i], nullptr, 10);
+        } else if (arg == L"--last" && has_value) {
+            last = wcstod(argv[++i], nullptr);
         } else if (arg.rfind(L"--", 0) == 0) {
             return usage();
         } else if (is_sacd_image(arg)) {
@@ -164,7 +179,18 @@ int play(int argc, wchar_t** argv) {
             queue.push_back(std::move(item));
         }
     }
-    if (queue.empty() || device_text.empty()) return usage();
+    if (!database.empty()) {
+        LibraryStore store(database);
+        for (const Track& track : store.album_tracks(album)) queue.push_back(make_queue_item(track));
+    }
+    if (first >= queue.size() || device_text.empty()) return usage();
+
+    // Goes straight to the join with the next track.
+    if (last > 0.0) {
+        const QueueItem& item = queue[first];
+        const auto decoder = item.open ? item.open() : open_decoder(item.path);
+        start = std::max(0.0, decoder->format().seconds() - last);
+    }
 
     auto device = find_device(kind, device_text);
     if (!device) {
@@ -193,7 +219,7 @@ int play(int argc, wchar_t** argv) {
     player.set_device(*device, options);
     player.set_policy(policy);
     player.set_queue(std::move(queue));
-    player.play();
+    player.play(first);
     if (start > 0.0) player.seek(start);
 
     std::string path_shown;
@@ -204,8 +230,8 @@ int play(int argc, wchar_t** argv) {
             path_shown = status.signal_path;
             printf("%s\n", path_shown.c_str());
         }
-        printf("%7.1f / %.1f s  buffer %3.0f%%  underruns %llu\n", status.position_seconds, status.duration_seconds,
-               status.ring_capacity ? 100.0 * status.buffered_bytes / status.ring_capacity : 0.0,
+        printf("track %zu  %7.1f / %.1f s  buffer %3.0f%%  underruns %llu\n", status.queue_index + 1, status.position_seconds,
+               status.duration_seconds, status.ring_capacity ? 100.0 * status.buffered_bytes / status.ring_capacity : 0.0,
                static_cast<unsigned long long>(status.underruns));
         fflush(stdout);
         if (limit > 0.0 && (GetTickCount() - begin) / 1000.0 >= limit) player.stop();
@@ -398,7 +424,12 @@ int wmain(int argc, wchar_t** argv) {
     if (command == L"devices") {
         status = list_devices();
     } else if (command == L"play") {
-        status = play(argc, argv);
+        try {
+            status = play(argc, argv);
+        } catch (const std::exception& error) {
+            fprintf(stderr, "error: %s\n", error.what());
+            status = 1;
+        }
     } else if (command == L"decode") {
         status = decode(argc, argv);
     } else if (command == L"loopback") {
