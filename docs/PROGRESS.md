@@ -4,13 +4,13 @@ Punto de partida para retomar el desarrollo. Última sesión: 2026-10-31. El dis
 
 ## Dónde estamos
 
-El motor de audio y la biblioteca funcionan desde línea de comandos con todos los formatos. La escucha real pasó con DSD nativo, SACD y WASAPI exclusivo, y el DAC reconoce DoP con el volumen de Windows al 100 %. Falta la interfaz.
+El motor de audio y la biblioteca funcionan desde línea de comandos con todos los formatos, y la escucha real pasó en todas las rutas. Falta la interfaz.
 
 | Fase | Estado |
 |---|---|
 | 1. Base del proyecto y detección de dispositivos | Hecha |
-| 2. Motor PCM: WASAPI, ASIO, gapless, seek, pausa | Hecha, falta escuchar PCM directo |
-| 3. DSD: DSF, DFF, SACD ISO, DST, nativo, DoP, conversión | Hecha, escucha superada; DoP reconocido, falta oírlo |
+| 2. Motor PCM: WASAPI, ASIO, gapless, seek, pausa | Hecha |
+| 3. DSD: DSF, DFF, SACD ISO, DST, nativo, DoP, conversión | Hecha |
 | 4. Biblioteca | Hecha |
 | 5. Interfaz en WebView2 | **Siguiente** |
 | 6. Cierre | Sin empezar |
@@ -19,9 +19,8 @@ El repositorio está versionado en la rama `main`, solo en local: todavía no ti
 
 ## Cómo retomar
 
-1. Oír DoP con música, si aún no se hizo. La [prueba de escucha](#prueba-de-escucha) confirmó que el DAC lo reconoce, pero con el volumen físico al mínimo.
-2. Confirmar la [decisión pendiente](#decisión-pendiente) sobre la interfaz.
-3. Compilar y probar:
+1. Confirmar la [decisión pendiente](#decisión-pendiente) sobre la interfaz.
+2. Compilar y probar:
 
    ```powershell
    cd arpegio
@@ -29,7 +28,7 @@ El repositorio está versionado en la rama `main`, solo en local: todavía no ti
    scripts\build.bat release test
    ```
 
-4. Seguir con la interfaz.
+3. Seguir con la interfaz.
 
 ## Decisión pendiente
 
@@ -79,9 +78,28 @@ En todas, 0 cortes y 0 eventos tardíos.
 
 Causa del fallo de DoP: el volumen de `Altavoces (TOPPING USB DAC)` es de hardware y estaba a −4 dB. Altera las muestras incluso en WASAPI exclusivo, cambia los bytes de marcador y el DAC reproduce el flujo como PCM. Fue la misma prueba, con el mismo archivo y formato, la que pasó de PCM 352.8 a DSD128 al subirlo a 0 dB.
 
-Con el volumen al 100 % y el físico al mínimo, el DAC mostró DSD en las 8 combinaciones probadas: DSD128 y DSD64, por ASIO y por WASAPI con S32, S32 de 24 bits y S24. Los contenedores no influyen. Solo se miró la pantalla: falta oír DoP con música.
+Con el volumen al 100 % y el físico al mínimo, el DAC mostró DSD en las 8 combinaciones probadas: DSD128 y DSD64, por ASIO y por WASAPI con S32, S32 de 24 bits y S24. Los contenedores no influyen.
 
 Por eso `DeviceInfo::hardware_gain_db` lee ese volumen en WASAPI. Si no es neutro, el modo automático no usa DoP, ninguna ruta se declara bit-perfect y `arpegio-cli` avisa. `--wire s32-24|s24` fuerza el contenedor WASAPI para repetir estas comprobaciones.
+
+Segunda tanda el mismo día, con Windows al 100 %. Las 14 pruebas sonaron bien, con 0 cortes, 0 eventos tardíos y 0 muestras recortadas:
+
+| Pruebas | Qué se escuchó |
+|---|---|
+| 1 y 2 | DoP con música: DSD128 por WASAPI y DSD64 por ASIO |
+| 3 a 6 | PCM directo: FLAC 24/96 por ASIO, WAV 16/44.1 por WASAPI, AAC por ASIO y MP3 por WASAPI |
+| 7 a 10 | Paso sin hueco: CUE en APE y en FLAC, archivos FLAC separados e híbrido `.iso.wv`. Nunca se reabrió el dispositivo |
+| 11 a 13 | Cambio de formato entre pistas: PCM a DSD y DSD a PCM por ASIO, y 44.1 a 96 kHz por WASAPI |
+| 14 | Mezcla a estéreo de un DSF de 6 canales |
+
+`arpegio-cli` reproduce álbumes de la biblioteca y salta a una transición. Los ids salen de `arpegio-library $db albums`:
+
+```powershell
+# Los 12 últimos segundos de la primera pista y el paso a la segunda
+.\arpegio-cli.exe play --db $db --album 18 --output asio --device topping --last 12 --seconds 24
+# Lo mismo entre dos archivos, aquí cambiando de formato
+.\arpegio-cli.exe play $wav $jazz --output asio --device topping --last 8 --seconds 18
+```
 
 ## Verificado
 
@@ -91,27 +109,24 @@ Los detalles y cifras están en [DESIGN.md](DESIGN.md#verificación-hecha-el-202
 - `LOOPBACK` del MiniFuse: coincidencia total a 24 bits en 44.1, 96 y 192 kHz.
 - 11 FLAC reales coinciden con su MD5.
 - DST idéntico a `libdstdec` en 18 000 frames, en 2 y 6 canales.
-- Topping: WASAPI exclusivo, compartido y ASIO, PCM, DoP y DSD nativo hasta DSD256, sin eventos tardíos ni cortes, siempre con silencio o señal inaudible.
+- Topping: WASAPI exclusivo, compartido y ASIO, PCM, DoP y DSD nativo hasta DSD256, sin eventos tardíos ni cortes.
+- [Escucha real](#prueba-de-escucha) de DSD nativo, DoP, SACD, PCM, conversión a PCM, paso sin hueco, cambio de formato y mezcla de 6 canales.
 - APE, WavPack PCM, M4A, MP3, DFF sin comprimir, WAV y FLAC reales abren y decodifican.
 - Biblioteca sobre la colección real: 5 184 pistas, 476 álbumes y 382 artistas. Las 5 184 pistas abren y se leen al principio, en medio y al final, también con las áreas multicanal de SACD. Reescanear sin cambios tarda 0.06 s y ningún archivo de la colección se modificó.
 - 954 pistas CUE empiezan en su muestra exacta en FLAC, WavPack, APE y DSF.
 
 ## Implementado pero sin verificar
 
-- Escucha de PCM directo: la prueba 4 solo cubre DSD convertido a PCM.
-- Paso sin hueco en SACD: comprobado de oído en un disco y una transición, sin medir.
-- DoP con música audible: el DAC lo reconoce, pero nadie lo ha escuchado todavía.
+- Paso sin hueco: pasó de oído en SACD, CUE y archivos separados, sin comparar la salida real muestra a muestra.
 - DoP por ASIO con el volumen de Windows bajo: ASIO no consulta ese volumen, y no se sabe si le afecta.
 - Aviso de volumen: la lógica está cubierta por pruebas, pero no se vio en pantalla con el Topping por debajo del 100 %. Se lee al listar dispositivos, no durante la reproducción.
 - Reapertura tras un reset de ASIO o una desconexión USB (`reopen_output_if_needed`).
-- Cambio de formato entre pistas en hardware real. Solo se probó con la salida simulada.
 - DFF con DST y WavPack con DSD: no hay archivos así en la colección.
 - AIFF y Ogg Vorbis: no hay archivos en `D:\Música`, aunque sí en otras carpetas del equipo.
 - ALAC: TagLib identifica los 37 `.m4a` de la colección como AAC, así que no hay ningún ALAC real con el que probar que sea exacto.
-- APE: se decodificaron 20 s, sin comprobar contra un hash.
-- Mezcla de 6 canales a estéreo: sin prueba automática ni escucha.
+- APE: pasó de oído, sin comprobar contra un hash.
+- Mezcla de 6 canales a estéreo: pasó de oído, sin prueba automática.
 - Calidad medida de r8brain en esta integración: solo corrió con silencio.
-- Paso sin hueco entre pistas CUE en el reproductor. Los rangos están comprobados en los decodificadores y el paso sin hueco con la salida simulada, pero nunca juntos ni en hardware real.
 - Vigilancia de carpetas sobre la colección real: solo se probó con carpetas temporales.
 - Hoja CUE en el bloque `CUESHEET` nativo de FLAC: solo se lee la etiqueta del mismo nombre.
 
