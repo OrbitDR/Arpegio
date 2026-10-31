@@ -85,6 +85,33 @@ TEST(exclusive_needs_dop_confirmation) {
     CHECK(plan.device.encoding == WireEncoding::S32);
 }
 
+// Measured on the Topping: DoP showed as PCM 352.8 with Windows at -4 dB and as DSD128 at 0 dB.
+TEST(hardware_volume_rules_out_automatic_dop) {
+    DeviceInfo device = topping_exclusive();
+    PlaybackPolicy policy;
+    policy.dop_confirmed = true;
+    CHECK(make_render_plan(dsd(kDsd128), device, policy).path == RenderPath::DsdDop);
+    CHECK(make_render_plan(dsd(kDsd128), device, policy).bit_perfect);
+
+    device.hardware_gain_db = -4.0;
+    CHECK(make_render_plan(dsd(kDsd128), device, policy).path == RenderPath::DsdToPcm);
+
+    // Asked for by name it is still sent, but it no longer claims to be exact.
+    policy.dsd = DsdPolicy::Dop;
+    const auto forced = make_render_plan(dsd(kDsd128), device, policy);
+    CHECK(forced.path == RenderPath::DsdDop);
+    CHECK(!forced.bit_perfect);
+}
+
+TEST(hardware_volume_is_not_bit_perfect) {
+    DeviceInfo device = topping_exclusive();
+    CHECK(make_render_plan(pcm(96000), device, {}).bit_perfect);
+    device.hardware_gain_db = -4.0;
+    CHECK(!make_render_plan(pcm(96000), device, {}).bit_perfect);
+    device.hardware_gain_db = 3.0;
+    CHECK(!make_render_plan(pcm(96000), device, {}).bit_perfect);
+}
+
 TEST(dop_stops_where_the_pcm_rates_stop) {
     PlaybackPolicy policy;
     policy.dop_confirmed = true;

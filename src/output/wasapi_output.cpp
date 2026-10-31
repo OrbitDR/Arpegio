@@ -8,6 +8,7 @@
 
 #include <audioclient.h>
 #include <avrt.h>
+#include <endpointvolume.h>
 #include <mmdeviceapi.h>
 #include <propidl.h>
 #include <propkeydef.h>
@@ -385,6 +386,20 @@ private:
     std::atomic<uint64_t> max_service_us_{0};
 };
 
+// Software volume never reaches an exclusive stream, but hardware volume does: on the Topping DX1 II
+// it rescales the samples, and DoP stops being recognized at anything but 0 dB.
+double read_hardware_gain_db(IMMDevice* device) {
+    ComPtr<IAudioEndpointVolume> volume;
+    DWORD support = 0;
+    float decibels = 0.0f;
+    if (FAILED(device->Activate(__uuidof(IAudioEndpointVolume), CLSCTX_ALL, nullptr, &volume)) ||
+        FAILED(volume->QueryHardwareSupport(&support)) || !(support & ENDPOINT_HARDWARE_SUPPORT_VOLUME) ||
+        FAILED(volume->GetMasterVolumeLevel(&decibels))) {
+        return 0.0;
+    }
+    return decibels;
+}
+
 }  // namespace
 
 std::vector<DeviceInfo> list_wasapi_devices(OutputKind kind) {
@@ -417,6 +432,7 @@ std::vector<DeviceInfo> list_wasapi_devices(OutputKind kind) {
             }
             PropVariantClear(&name);
         }
+        info.hardware_gain_db = read_hardware_gain_db(device.Get());
 
         ComPtr<IAudioClient> client;
         result = device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, &client);

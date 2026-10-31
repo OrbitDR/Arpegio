@@ -27,6 +27,7 @@ void print_device(const DeviceInfo& device) {
         printf("  unavailable: %s\n", device.error.c_str());
         return;
     }
+    if (device.hardware_gain_db != 0.0) printf("  windows volume: %.1f dB\n", device.hardware_gain_db);
     printf("  channels: %d", device.channels);
     if (device.kind == OutputKind::Asio) {
         printf("  buffer: %d..%d, preferred %d", device.buffer_min, device.buffer_max, device.buffer_preferred);
@@ -87,7 +88,7 @@ int usage() {
     fputs("usage: arpegio-cli devices\n"
           "       arpegio-cli play FILE... --output asio|exclusive|shared --device TEXT\n"
           "                   [--dsd auto|native|dop|pcm] [--dop-confirmed] [--gain-db DB]\n"
-          "                   [--first-channel N] [--period-ms N] [--buffer N]\n"
+          "                   [--first-channel N] [--period-ms N] [--buffer N] [--wire s32-24|s24]\n"
           "                   [--start SECONDS] [--seconds SECONDS] [--track N] [--multichannel]\n"
           "       arpegio-cli decode FILE [OUT.raw] [--seconds S]\n"
           "       arpegio-cli loopback FILE --device TEXT --first-channel N --capture-channel N\n",
@@ -105,6 +106,7 @@ int play(int argc, wchar_t** argv) {
     double limit = 0.0;
     int sacd_track = 0;
     bool multichannel = false;
+    std::wstring wire;
 
     for (int i = 2; i < argc; ++i) {
         const std::wstring arg = argv[i];
@@ -138,6 +140,8 @@ int play(int argc, wchar_t** argv) {
             sacd_track = _wtoi(argv[++i]);
         } else if (arg == L"--multichannel") {
             multichannel = true;
+        } else if (arg == L"--wire" && has_value) {
+            wire = argv[++i];
         } else if (arg.rfind(L"--", 0) == 0) {
             return usage();
         } else if (is_sacd_image(arg)) {
@@ -162,7 +166,7 @@ int play(int argc, wchar_t** argv) {
     }
     if (queue.empty() || device_text.empty()) return usage();
 
-    const auto device = find_device(kind, device_text);
+    auto device = find_device(kind, device_text);
     if (!device) {
         fputs("device not found\n", stderr);
         return 1;
@@ -170,6 +174,19 @@ int play(int argc, wchar_t** argv) {
     if (!device->error.empty()) {
         fprintf(stderr, "device unavailable: %s\n", device->error.c_str());
         return 1;
+    }
+    // Forces the WASAPI container, to find out what a device accepts or recognizes as DoP.
+    if (wire == L"s32-24" || wire == L"s24") {
+        for (PcmMode& mode : device->pcm_modes) {
+            mode.encoding = wire == L"s24" ? WireEncoding::S24 : WireEncoding::S32;
+            mode.valid_bits = 24;
+        }
+    }
+    if (device->hardware_gain_db != 0.0) {
+        fprintf(stderr,
+                "warning: the Windows volume of this device is at %.1f dB. Set it to 100 %% and use the volume on the DAC:\n"
+                "         otherwise the output is not bit-perfect and DoP is not recognized.\n",
+                device->hardware_gain_db);
     }
 
     Player player;

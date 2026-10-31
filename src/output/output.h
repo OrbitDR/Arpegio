@@ -40,7 +40,8 @@ struct DeviceInfo {
     int buffer_min = 0;
     int buffer_max = 0;
     int buffer_preferred = 0;
-    std::string error;  // why the device could not be queried, empty when it could
+    double hardware_gain_db = 0.0;  // Windows hardware volume of a WASAPI endpoint, 0 when neutral or unknown
+    std::string error;              // why the device could not be queried, empty when it could
 };
 
 // Supplies audio from the real-time thread. Must not block, allocate or log.

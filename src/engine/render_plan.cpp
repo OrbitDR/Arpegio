@@ -11,6 +11,13 @@ namespace arpegio {
 namespace {
 
 constexpr uint32_t kDopDivider = 16;
+constexpr double kNeutralGainDb = 0.01;
+
+// A hardware volume away from 0 dB can rescale samples after they leave the program, which voids
+// bit-perfect output and hides the DoP markers from the DAC.
+bool volume_is_neutral(const DeviceInfo& device) {
+    return std::abs(device.hardware_gain_db) < kNeutralGainDb;
+}
 
 const PcmMode* find_mode(const DeviceInfo& device, uint32_t rate) {
     for (const PcmMode& mode : device.pcm_modes) {
@@ -70,7 +77,7 @@ RenderPlan plan_pcm(const SourceFormat& source, const DeviceInfo& device, const 
     // Mono copied to both channels keeps every sample, so it stays bit-perfect.
     const bool mono_copy = source.channels == 1 && plan.device.channels == 2;
     const bool processed = plan.resample_from != 0 || (plan.mix_channels && !mono_copy);
-    plan.bit_perfect = !processed && !reduces_depth && device.kind != OutputKind::WasapiShared;
+    plan.bit_perfect = !processed && !reduces_depth && device.kind != OutputKind::WasapiShared && volume_is_neutral(device);
     plan.dither_bits = (processed || reduces_depth) ? std::min(policy.dither_bits, wire_resolution(mode.encoding)) : 0;
     return plan;
 }
@@ -86,11 +93,11 @@ RenderPlan plan_dsd_native(const SourceFormat& source) {
     return plan;
 }
 
-RenderPlan plan_dop(const SourceFormat& source, const PcmMode& mode) {
+RenderPlan plan_dop(const SourceFormat& source, const DeviceInfo& device, const PcmMode& mode) {
     RenderPlan plan;
     plan.path = RenderPath::DsdDop;
     plan.device = pcm_device_format(mode, source.channels);
-    plan.bit_perfect = true;
+    plan.bit_perfect = volume_is_neutral(device);
     return plan;
 }
 
@@ -129,14 +136,14 @@ RenderPlan make_render_plan(const SourceFormat& source, const DeviceInfo& device
         return plan_dsd_native(source);
     case DsdPolicy::Dop:
         if (!dop_ok) throw std::runtime_error("this output cannot carry this DSD rate as DoP");
-        return plan_dop(source, *dop_mode);
+        return plan_dop(source, device, *dop_mode);
     case DsdPolicy::Pcm:
         return plan_conversion(source, device, policy);
     case DsdPolicy::Auto:
         break;
     }
     if (native_ok) return plan_dsd_native(source);
-    if (dop_ok && policy.dop_confirmed) return plan_dop(source, *dop_mode);
+    if (dop_ok && policy.dop_confirmed && volume_is_neutral(device)) return plan_dop(source, device, *dop_mode);
     return plan_conversion(source, device, policy);
 }
 
