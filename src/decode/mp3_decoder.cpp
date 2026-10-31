@@ -19,6 +19,10 @@ public:
         if (mp3dec_ex_open_w(&decoder_, path.c_str(), MP3D_SEEK_TO_SAMPLE) != 0) {
             throw std::runtime_error("MP3: cannot open file");
         }
+        if (decoder_.info.channels == 0 || decoder_.info.hz == 0) {
+            mp3dec_ex_close(&decoder_);
+            throw std::runtime_error("MP3: no audio frames found");
+        }
         format_.rate = static_cast<uint32_t>(decoder_.info.hz);
         format_.channels = decoder_.info.channels;
         format_.bits = 16;

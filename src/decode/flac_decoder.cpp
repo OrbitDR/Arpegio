@@ -35,6 +35,7 @@ public:
             FLAC__stream_decoder_delete(decoder_);
             throw std::runtime_error("FLAC: cannot read stream header");
         }
+        if (format_.length == 0) measure_length();
     }
 
     ~FlacDecoder() override {
@@ -78,11 +79,26 @@ public:
     }
 
 private:
+    // Encoders writing to a pipe leave the total out of the header. Duration and seeking need it, and
+    // decoding is the only way to get it.
+    void measure_length() {
+        counting_ = true;
+        FLAC__stream_decoder_process_until_end_of_stream(decoder_);
+        counting_ = false;
+        FLAC__stream_decoder_reset(decoder_);
+        FLAC__stream_decoder_process_until_end_of_metadata(decoder_);
+        format_.length = counted_;
+    }
+
     static FLAC__StreamDecoderWriteStatus on_write(const FLAC__StreamDecoder*, const FLAC__Frame* frame,
                                                    const FLAC__int32* const buffer[], void* context) {
         auto* self = static_cast<FlacDecoder*>(context);
         const unsigned blocksize = frame->header.blocksize;
         const unsigned channels = frame->header.channels;
+        if (self->counting_) {
+            self->counted_ += blocksize;
+            return FLAC__STREAM_DECODER_WRITE_STATUS_CONTINUE;
+        }
         if (static_cast<int>(channels) != self->format_.channels) return FLAC__STREAM_DECODER_WRITE_STATUS_ABORT;
         const double scale = 1.0 / static_cast<double>(1ull << (frame->header.bits_per_sample - 1));
         const size_t base = self->pending_.size();
@@ -111,6 +127,8 @@ private:
     SourceFormat format_;
     std::vector<double> pending_;
     size_t pending_pos_ = 0;
+    bool counting_ = false;
+    uint64_t counted_ = 0;
 };
 
 }  // namespace
