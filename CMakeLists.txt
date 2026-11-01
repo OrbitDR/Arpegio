@@ -170,11 +170,12 @@ target_link_libraries(arpegio_app PUBLIC arpegio_core)
 add_executable(arpegio WIN32
     src/app/main.cpp
     src/app/main_window.cpp
+    src/app/media_controls.cpp
     src/app/arpegio.rc
 )
 target_include_directories(arpegio PRIVATE src/app)
 target_include_directories(arpegio SYSTEM PRIVATE third_party/webview2/build/native/include)
-target_link_libraries(arpegio PRIVATE arpegio_app dwmapi shell32
+target_link_libraries(arpegio PRIVATE arpegio_app dwmapi shell32 shcore windowsapp
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/webview2/build/native/x64/WebView2LoaderStatic.lib)
 # The page is served from a folder next to the executable. A target of its own, because a change that
 # only touches the page does not relink anything.

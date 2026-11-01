@@ -4,6 +4,8 @@
 
 #include <FLAC/stream_encoder.h>
 #include <fileref.h>
+#include <mp4file.h>
+#include <mp4tag.h>
 #include <tag.h>
 #include <tpropertymap.h>
 
@@ -814,6 +816,33 @@ TEST(replay_gain_tags_come_from_the_file) {
     ArtworkCache artwork(folder.cache());
     scan_folder(store, artwork, folder.music());
     CHECK(store.tracks().at(0).replay_gain == tags);
+}
+
+TEST(replay_gain_is_also_read_from_the_freeform_atoms_of_mp4) {
+    const auto atom = [](const std::string& name, const std::string& body) {
+        const uint32_t size = static_cast<uint32_t>(body.size() + 8);
+        const char length[4] = {static_cast<char>(size >> 24), static_cast<char>(size >> 16), static_cast<char>(size >> 8),
+                                static_cast<char>(size)};
+        return std::string(length, 4) + name + body;
+    };
+
+    TempFolder folder;
+    const fs::path path = folder.music() / "one.m4a";
+    write_text(path, atom("ftyp", std::string("M4A \0\0\0\0M4A mp42", 16)) + atom("moov", atom("mvhd", std::string(100, '\0'))));
+    {
+        TagLib::MP4::File file(path.c_str());
+        CHECK(file.isValid());
+        file.tag()->setItem("----:com.apple.iTunes:replaygain_track_gain", TagLib::MP4::Item(TagLib::StringList("-6.54 dB")));
+        file.tag()->setItem("----:com.apple.iTunes:REPLAYGAIN_TRACK_PEAK", TagLib::MP4::Item(TagLib::StringList("0.950000")));
+        file.tag()->setItem("----:org.hydrogenaudio.replaygain:replaygain_album_gain",
+                            TagLib::MP4::Item(TagLib::StringList("-3.25 dB")));
+        CHECK(file.save());
+    }
+
+    const ReplayGainTags tags = read_metadata(path).replay_gain;
+    CHECK(tags.track_gain_db.has_value() && *tags.track_gain_db == -6.54);
+    CHECK(tags.track_peak.has_value() && *tags.track_peak == 0.95);
+    CHECK(tags.album_gain_db.has_value() && *tags.album_gain_db == -3.25);
 }
 
 TEST(a_file_without_those_tags_keeps_them_empty) {

@@ -7,6 +7,7 @@
 #include <objbase.h>
 #include <shellapi.h>
 #include <shlobj_core.h>
+#include <shobjidl_core.h>
 
 #include <algorithm>
 #include <filesystem>
@@ -17,6 +18,10 @@
 using namespace arpegio;
 
 namespace {
+
+// The installer gives the same one to its shortcut, which ties together the taskbar button, the name Windows
+// shows beside the media controls, and the shortcut's icon.
+constexpr const wchar_t* kAppUserModelId = L"OrbitDR.Arpegio";
 
 std::filesystem::path default_data_folder() {
     PWSTR folder = nullptr;
@@ -76,6 +81,7 @@ bool already_running(const std::filesystem::path& data_folder, HANDLE& guard) {
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    SetCurrentProcessExplicitAppUserModelID(kAppUserModelId);
     const HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
 
     int status = 1;

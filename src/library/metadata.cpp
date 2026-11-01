@@ -3,7 +3,9 @@
 #include <windows.h>
 
 #include <fileref.h>
+#include <mp4file.h>
 #include <mp4properties.h>
+#include <mp4tag.h>
 #include <tag.h>
 #include <tfilestream.h>
 #include <tpropertymap.h>
@@ -135,6 +137,18 @@ void read_picture(TagLib::FileRef& file, Metadata& metadata) {
     metadata.artwork.assign(data.begin(), data.end());
 }
 
+// The property map leaves out the freeform MP4 atoms TagLib has no name for, and these are among them.
+// Taggers put them under com.apple.iTunes or org.hydrogenaudio.replaygain, in either case.
+void add_mp4_replay_gain(TagLib::File* file, TagLib::PropertyMap& properties) {
+    const auto* mp4 = dynamic_cast<TagLib::MP4::File*>(file);
+    if (!mp4 || !mp4->tag()) return;
+    for (const auto& [key, item] : mp4->tag()->itemMap()) {
+        const TagLib::String name = key.upper();
+        const TagLib::String field = name.substr(name.rfind(":") + 1);
+        if (name.startsWith("----:") && field.startsWith("REPLAYGAIN_")) properties.replace(field, item.toStringList());
+    }
+}
+
 ReplayGainTags read_replay_gain(const TagLib::PropertyMap& properties) {
     return {parse_replay_gain(first_value(properties, "REPLAYGAIN_TRACK_GAIN")),
             parse_replay_peak(first_value(properties, "REPLAYGAIN_TRACK_PEAK")),
@@ -174,7 +188,8 @@ Metadata read_metadata(const std::filesystem::path& path) {
         metadata.year = static_cast<int>(tag->year());
     }
 
-    const TagLib::PropertyMap properties = file.file()->properties();
+    TagLib::PropertyMap properties = file.file()->properties();
+    add_mp4_replay_gain(file.file(), properties);
     metadata.album_artist = first_value(properties, "ALBUMARTIST");
     metadata.composer = first_value(properties, "COMPOSER");
     metadata.cue_sheet = first_value(properties, "CUESHEET");

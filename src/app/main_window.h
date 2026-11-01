@@ -15,6 +15,7 @@
 #include <string>
 
 #include "app/controller.h"
+#include "app/media_controls.h"
 
 namespace arpegio {
 
@@ -54,11 +55,14 @@ private:
 
     void tick();
     void save_placement();
-    void media_key(int key);
+    void media_command(MediaCommand command);
+    void media_seek(double seconds);
 
     AppOptions options_;
     HWND window_ = nullptr;
+    UINT taskbar_button_created_ = 0;
     std::unique_ptr<Controller> controller_;
+    std::unique_ptr<MediaControls> media_;
     Microsoft::WRL::ComPtr<ICoreWebView2Environment> environment_;
     Microsoft::WRL::ComPtr<ICoreWebView2Controller> host_;
     Microsoft::WRL::ComPtr<ICoreWebView2> webview_;

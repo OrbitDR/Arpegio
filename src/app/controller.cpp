@@ -912,4 +912,35 @@ std::string Controller::now_playing_title() const {
     return display_name(track.title) + " - " + display_name(track.artist);
 }
 
+NowPlaying Controller::now_playing() {
+    const PlayerStatus status = player_.status();
+    const bool stopped = status.state == PlayerState::Stopped;
+    const size_t index = stopped ? resume_index_ : status.queue_index;
+
+    NowPlaying now;
+    now.state = status.state;
+    if (index >= queue_.size()) return now;
+    const Track& track = queue_[index];
+    now.has_track = true;
+    now.track_id = track.id;
+    now.title = display_name(track.title);
+    now.artist = display_name(track.artist);
+    now.album = display_name(track.album);
+    now.position = stopped ? resume_position_ : status.position_seconds;
+    now.duration = !stopped && status.duration_seconds > 0.0 ? status.duration_seconds
+                   : track.format.rate                       ? track.format.seconds()
+                                                             : 0.0;
+    now.can_go_next = index + 1 < queue_.size() || settings_.repeat == "queue";
+    now.can_go_back = true;  // goes to the start of the track at least
+
+    const ArtworkId art = track_artwork(track);
+    if (art != now_playing_art_) {
+        now_playing_art_ = art;
+        const std::optional<ArtworkResponse> file = artwork(art, true);
+        now_playing_art_file_ = file ? file->file : std::filesystem::path();
+    }
+    now.artwork = now_playing_art_file_;
+    return now;
+}
+
 }  // namespace arpegio

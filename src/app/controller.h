@@ -27,6 +27,21 @@ struct ArtworkResponse {
     std::string mime;
 };
 
+// What the rest of Windows is told about the music.
+struct NowPlaying {
+    PlayerState state = PlayerState::Stopped;
+    bool has_track = false;  // stopped with a queue still names where play would start
+    int64_t track_id = 0;
+    std::string title;
+    std::string artist;
+    std::string album;
+    std::filesystem::path artwork;  // the thumbnail, empty when the track has none
+    double position = 0.0;
+    double duration = 0.0;
+    bool can_go_next = false;
+    bool can_go_back = false;
+};
+
 class Controller {
 public:
     using Emit = std::function<void(const std::string& event, const nlohmann::json& data)>;
@@ -57,6 +72,7 @@ public:
     void set_window_placement(const WindowPlacement& placement);
 
     std::string now_playing_title() const;  // for the window title, empty when nothing plays
+    NowPlaying now_playing();
 
 private:
     using Handler = std::function<nlohmann::json(const nlohmann::json&)>;
@@ -110,6 +126,8 @@ private:
     bool was_active_ = false;
     bool muted_ = false;  // not saved: starting silent would look like a fault
     int volume_ticks_to_save_ = 0;  // a slider sends many changes, and the file only needs the last one
+    ArtworkId now_playing_art_ = 0;  // the last one looked up, because now_playing() runs on every tick
+    std::filesystem::path now_playing_art_file_;
     nlohmann::json last_status_;
     nlohmann::json last_library_;
 

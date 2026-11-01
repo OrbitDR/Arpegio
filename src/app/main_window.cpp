@@ -30,6 +30,8 @@ constexpr std::wstring_view kArtOriginal = L"https://art.arpegio.example/full/";
 constexpr UINT_PTR kTickTimer = 1;
 constexpr UINT kTickMs = 200;
 constexpr UINT kPickFolderMessage = WM_APP + 1;
+constexpr UINT kMediaCommandMessage = WM_APP + 2;
+constexpr UINT kMediaSeekMessage = WM_APP + 3;
 
 constexpr COLORREF kCaptionColor = RGB(0x12, 0x13, 0x16);
 constexpr COREWEBVIEW2_COLOR kPageColor = {255, 0x0E, 0x0F, 0x11};
@@ -37,8 +39,6 @@ constexpr int kDefaultWidth = 1320;
 constexpr int kDefaultHeight = 860;
 constexpr int kMinimumWidth = 900;
 constexpr int kMinimumHeight = 600;
-
-enum MediaKey { kPlayPause = 1, kNext, kPrevious };
 
 constexpr const char* kPickFolderRequest = "library.pickFolder";
 
@@ -89,13 +89,12 @@ MainWindow::MainWindow(HINSTANCE instance, AppOptions options) : options_(std::m
     const COLORREF caption = kCaptionColor;
     DwmSetWindowAttribute(window_, DWMWA_CAPTION_COLOR, &caption, sizeof(caption));
 
+    // Before the window is shown: that is when Windows announces the taskbar button.
+    taskbar_button_created_ = RegisterWindowMessageW(L"TaskbarButtonCreated");
+    media_ = std::make_unique<MediaControls>(window_, kMediaCommandMessage, kMediaSeekMessage);
+
     ShowWindow(window_, saved && placement->maximized ? SW_SHOWMAXIMIZED : SW_SHOWNORMAL);
     UpdateWindow(window_);
-
-    // Fails when another program holds a key. The page's own buttons still work.
-    RegisterHotKey(window_, kPlayPause, MOD_NOREPEAT, VK_MEDIA_PLAY_PAUSE);
-    RegisterHotKey(window_, kNext, MOD_NOREPEAT, VK_MEDIA_NEXT_TRACK);
-    RegisterHotKey(window_, kPrevious, MOD_NOREPEAT, VK_MEDIA_PREV_TRACK);
 
     SetTimer(window_, kTickTimer, kTickMs, nullptr);
     create_webview();
@@ -126,6 +125,10 @@ LRESULT CALLBACK MainWindow::window_proc(HWND window, UINT message, WPARAM wpara
 }
 
 LRESULT MainWindow::on_message(UINT message, WPARAM wparam, LPARAM lparam) {
+    if (message == taskbar_button_created_ && media_) {
+        media_->on_taskbar_button_created();
+        return 0;
+    }
     switch (message) {
     case WM_SIZE:
         if (host_) {
@@ -156,11 +159,33 @@ LRESULT MainWindow::on_message(UINT message, WPARAM wparam, LPARAM lparam) {
     case WM_TIMER:
         if (wparam == kTickTimer) tick();
         return 0;
-    case WM_HOTKEY:
-        media_key(static_cast<int>(wparam));
+    case WM_COMMAND:
+        if (HIWORD(wparam) == THBN_CLICKED && media_) media_->on_thumbnail_button(LOWORD(wparam));
         return 0;
+    case WM_SETTINGCHANGE:
+        if (media_ && lparam && CompareStringOrdinal(reinterpret_cast<const wchar_t*>(lparam), -1, L"ImmersiveColorSet", -1,
+                                                     TRUE) == CSTR_EQUAL) {
+            media_->on_theme_changed();
+        }
+        return DefWindowProcW(window_, message, wparam, lparam);
+    case WM_APPCOMMAND:
+        // Only when no media session takes the keys, such as before anything was queued.
+        switch (GET_APPCOMMAND_LPARAM(lparam)) {
+        case APPCOMMAND_MEDIA_PLAY_PAUSE: media_command(MediaCommand::Toggle); return TRUE;
+        case APPCOMMAND_MEDIA_PLAY: media_command(MediaCommand::Play); return TRUE;
+        case APPCOMMAND_MEDIA_PAUSE: media_command(MediaCommand::Pause); return TRUE;
+        case APPCOMMAND_MEDIA_NEXTTRACK: media_command(MediaCommand::Next); return TRUE;
+        case APPCOMMAND_MEDIA_PREVIOUSTRACK: media_command(MediaCommand::Previous); return TRUE;
+        default: return DefWindowProcW(window_, message, wparam, lparam);
+        }
     case kPickFolderMessage:
         pick_folder(static_cast<int64_t>(wparam));
+        return 0;
+    case kMediaCommandMessage:
+        media_command(static_cast<MediaCommand>(wparam));
+        return 0;
+    case kMediaSeekMessage:
+        media_seek(static_cast<double>(lparam) / 1000.0);
         return 0;
     case WM_CLOSE:
         save_placement();
@@ -171,6 +196,7 @@ LRESULT MainWindow::on_message(UINT message, WPARAM wparam, LPARAM lparam) {
         if (host_) host_->Close();
         webview_.Reset();
         host_.Reset();
+        media_.reset();
         controller_.reset();
         window_ = nullptr;
         PostQuitMessage(0);
@@ -392,6 +418,7 @@ void MainWindow::tick() {
         title_shown_ = title;
         SetWindowTextW(window_, title.empty() ? L"Arpegio" : to_wide(title + "  ·  Arpegio").c_str());
     }
+    if (media_) media_->update(controller_->now_playing());
 }
 
 void MainWindow::save_placement() {
@@ -403,10 +430,30 @@ void MainWindow::save_placement() {
                                        placement.showCmd == SW_SHOWMAXIMIZED});
 }
 
-void MainWindow::media_key(int key) {
+void MainWindow::media_command(MediaCommand command) {
+    if (!controller_) return;
     try {
-        const char* method = key == kPlayPause ? "player.toggle" : key == kNext ? "player.next" : "player.previous";
-        controller_->handle(method, json::object());
+        const bool playing = controller_->now_playing().state == PlayerState::Playing;
+        switch (command) {
+        case MediaCommand::Play:
+            if (!playing) controller_->handle("player.toggle", json::object());
+            break;
+        case MediaCommand::Pause:
+            if (playing) controller_->handle("player.toggle", json::object());
+            break;
+        case MediaCommand::Toggle: controller_->handle("player.toggle", json::object()); break;
+        case MediaCommand::Next: controller_->handle("player.next", json::object()); break;
+        case MediaCommand::Previous: controller_->handle("player.previous", json::object()); break;
+        }
+    } catch (const std::exception& error) {
+        post({{"event", "error"}, {"data", {{"message", error.what()}}}});
+    }
+}
+
+void MainWindow::media_seek(double seconds) {
+    if (!controller_) return;
+    try {
+        controller_->handle("player.seek", {{"seconds", seconds}});
     } catch (const std::exception& error) {
         post({{"event", "error"}, {"data", {{"message", error.what()}}}});
     }
