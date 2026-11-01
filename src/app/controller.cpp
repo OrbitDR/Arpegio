@@ -18,6 +18,23 @@ namespace arpegio {
 
 namespace {
 
+constexpr double kMinVolumeDb = -60.0;  // the bottom of the slider, which is silence
+constexpr int kVolumeSaveTicks = 5;
+
+double volume_gain(double db) {
+    return db <= kMinVolumeDb ? 0.0 : std::pow(10.0, db / 20.0);
+}
+
+double gain_db(double gain) {
+    return 20.0 * std::log10(gain);
+}
+
+ReplayGainMode replay_gain_mode(const std::string& name) {
+    if (name == "track") return ReplayGainMode::Track;
+    if (name == "album") return ReplayGainMode::Album;
+    return ReplayGainMode::Off;
+}
+
 const char* kind_key(OutputKind kind) {
     switch (kind) {
     case OutputKind::Asio: return "asio";
@@ -141,8 +158,10 @@ json plan_json(const RenderPlan& plan) {
             {"validBits", plan.device.valid_bits},
             {"resampleFrom", plan.resample_from},
             {"mixChannels", plan.mix_channels},
-            {"gainDb", 20.0 * std::log10(plan.gain)},
+            {"gainDb", gain_db(plan.gain)},
             {"ditherBits", plan.dither_bits},
+            {"gainDitherBits", plan.gain_dither_bits},
+            {"acceptsGain", plan.accepts_gain()},
             {"firRate", plan.path == RenderPath::DsdToPcm ? plan.dsd.fir_rate : 0},
             {"firDivider", plan.path == RenderPath::DsdToPcm ? plan.dsd.divider : 0},
             {"firCutoffHz", plan.path == RenderPath::DsdToPcm ? plan.dsd.filter.f3_hz : 0.0}};
@@ -154,7 +173,8 @@ json device_settings_json(const DeviceSettings& device) {
             {"dsdGainDb", device.dsd_gain_db},
             {"firstChannel", device.first_channel},
             {"periodMs", device.period_ms},
-            {"bufferFrames", device.buffer_frames}};
+            {"bufferFrames", device.buffer_frames},
+            {"volumeDb", device.volume_db}};
 }
 
 std::vector<DeviceInfo> list_real_devices() {
@@ -219,7 +239,8 @@ void Controller::register_handlers() {
                          {"folders", folders_json()},
                          {"playlists", playlists_json()},
                          {"devices", devices_json()},
-                         {"sacdMultichannel", settings_.sacd_multichannel}};
+                         {"sacdMultichannel", settings_.sacd_multichannel},
+                         {"replayGain", settings_.replay_gain}};
          }},
 
         {"library.albums", [this](const json&) { return albums_json(library_->store().albums()); }},
@@ -441,6 +462,22 @@ void Controller::register_handlers() {
              last_status_ = nullptr;
              return json{};
          }},
+        {"player.setVolume",
+         [this](const json& params) {
+             set_volume(params.at("db"));
+             return json{};
+         }},
+        {"player.setMuted",
+         [this](const json& params) {
+             muted_ = params.at("muted");
+             apply_volume();
+             return json{};
+         }},
+        {"player.setReplayGain",
+         [this](const json& params) {
+             set_replay_gain(params.at("mode").get<std::string>());
+             return json{};
+         }},
 
         {"devices.list", [this](const json&) { return devices_json(); }},
         {"devices.refresh",
@@ -492,7 +529,8 @@ std::vector<Track> Controller::tracks_from(const json& ids) {
 std::vector<QueueItem> Controller::queue_items() const {
     std::vector<QueueItem> items;
     items.reserve(queue_.size());
-    for (const Track& track : queue_) items.push_back(make_queue_item(track));
+    const ReplayGainMode mode = replay_gain_mode(settings_.replay_gain);
+    for (const Track& track : queue_) items.push_back(make_queue_item(track, mode));
     return items;
 }
 
@@ -668,9 +706,41 @@ void Controller::apply_output() {
     }
     player_.set_device(*device, options);
     player_.set_policy(policy);
+    apply_volume();
     if (active) {
         player_.play(status.queue_index, status.position_seconds);
         player_.set_paused(status.state == PlayerState::Paused);
+    }
+}
+
+void Controller::apply_volume() {
+    const auto saved = settings_.devices.find(settings_.device);
+    const double db = saved == settings_.devices.end() ? 0.0 : saved->second.volume_db;
+    player_.set_volume(muted_ ? 0.0 : volume_gain(db));
+    last_status_ = nullptr;
+}
+
+void Controller::set_volume(double db) {
+    if (settings_.device.empty()) return;
+    const PlayerStatus status = player_.status();
+    if (status.stream_open && !status.plan.accepts_gain()) {
+        throw std::runtime_error("con DSD nativo o DoP no hay volumen por software: usa el del DAC");
+    }
+    settings_for(settings_.device).volume_db = std::clamp(db, kMinVolumeDb, 0.0);
+    muted_ = false;
+    apply_volume();
+    volume_ticks_to_save_ = kVolumeSaveTicks;
+}
+
+void Controller::set_replay_gain(const std::string& mode) {
+    settings_.replay_gain = mode;
+    save_settings_quietly();
+    if (playing()) {
+        // The ring holds up to a minute and a half at the old gain.
+        player_.update_queue(queue_items(), current_index());
+        player_.reload();
+    } else {
+        player_.set_queue(queue_items());
     }
 }
 
@@ -728,6 +798,7 @@ json Controller::status_json(const PlayerStatus& status) const {
     const bool stopped = status.state == PlayerState::Stopped;
     const size_t index = stopped ? resume_index_ : status.queue_index;
     const DeviceInfo* device = selected_device();
+    const auto saved = settings_.devices.find(settings_.device);
     json out = {{"state", state_name(status.state)},
                 {"index", index},
                 {"trackId", index < queue_.size() ? queue_[index].id : 0},
@@ -735,6 +806,10 @@ json Controller::status_json(const PlayerStatus& status) const {
                 {"duration", !stopped && status.duration_seconds > 0.0 ? status.duration_seconds
                              : index < queue_.size() && queue_[index].format.rate ? queue_[index].format.seconds() : 0.0},
                 {"repeat", settings_.repeat},
+                {"volumeDb", saved == settings_.devices.end() ? 0.0 : saved->second.volume_db},
+                {"volumeFloorDb", kMinVolumeDb},
+                {"muted", muted_},
+                {"trackGainDb", gain_db(status.track_gain)},
                 {"bitPerfect", status.bit_perfect},
                 // A shared stream keeps nobody out, so there is nothing to release.
                 {"deviceHeld", status.stream_open && device && device->kind != OutputKind::WasapiShared},
@@ -804,6 +879,8 @@ void Controller::tick() {
         save_settings_quietly();
     }
     was_active_ = active;
+
+    if (volume_ticks_to_save_ > 0 && --volume_ticks_to_save_ == 0) save_settings_quietly();
 
     json current = status_json(status);
     if (current != last_status_) {

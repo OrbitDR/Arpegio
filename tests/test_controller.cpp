@@ -1,5 +1,9 @@
 #include <windows.h>
 
+#include <fileref.h>
+#include <tag.h>
+#include <tpropertymap.h>
+
 #include <atomic>
 #include <cmath>
 #include <cstring>
@@ -650,14 +654,137 @@ TEST(settings_survive_a_damaged_file) {
     CHECK(settings.repeat == "off");
 }
 
+TEST(controller_keeps_a_volume_for_each_output) {
+    Harness h;
+    h.open();
+    CHECK(h.devices_ready());
+    h.call("player.setVolume", {{"db", -12.5}});
+    CHECK_NEAR(h.status().at("volumeDb").get<double>(), -12.5, 1e-9);
+
+    h.call("devices.select", {{"key", "asio:{asio}"}});
+    CHECK_NEAR(h.status().at("volumeDb").get<double>(), 0.0, 1e-9);
+    h.call("devices.select", {{"key", "shared:{speakers}"}});
+    CHECK_NEAR(h.status().at("volumeDb").get<double>(), -12.5, 1e-9);
+
+    h.controller.reset();
+    h.last_event.clear();
+    h.open();
+    CHECK(h.devices_ready());
+    CHECK_NEAR(h.status().at("volumeDb").get<double>(), -12.5, 1e-9);
+}
+
+TEST(controller_saves_the_volume_without_waiting_to_close) {
+    // A crash must not bring back full level, so this looks at the file with the application still open.
+    Harness h;
+    h.open();
+    CHECK(h.devices_ready());
+    h.call("player.setVolume", {{"db", -20.0}});
+    h.call("player.setVolume", {{"db", -24.0}});
+    CHECK(h.until([&] {
+        const Settings saved = load_settings(h.data / "settings.json");
+        const auto device = saved.devices.find(saved.device);
+        return device != saved.devices.end() && device->second.volume_db == -24.0;
+    }));
+}
+
+TEST(controller_keeps_the_volume_inside_its_range) {
+    Harness h;
+    h.open();
+    CHECK(h.devices_ready());
+    h.call("player.setVolume", {{"db", 6.0}});
+    CHECK_NEAR(h.status().at("volumeDb").get<double>(), 0.0, 1e-9);
+    h.call("player.setVolume", {{"db", -200.0}});
+    CHECK_NEAR(h.status().at("volumeDb").get<double>(), h.status().at("volumeFloorDb").get<double>(), 1e-9);
+}
+
+TEST(controller_says_bit_perfect_only_while_nothing_scales_the_samples) {
+    Harness h;
+    const std::vector<int64_t> ids = h.library_with_tracks();
+    h.call("devices.select", {{"key", "asio:{asio}"}});
+    h.call("queue.play", {{"tracks", ids}});
+    CHECK(h.until([&] { return h.status().at("bitPerfect").get<bool>(); }));
+
+    h.call("player.setVolume", {{"db", -1.0}});
+    CHECK(!h.status().at("bitPerfect").get<bool>());
+    h.call("player.setVolume", {{"db", 0.0}});
+    CHECK(h.status().at("bitPerfect").get<bool>());
+
+    h.call("player.setMuted", {{"muted", true}});
+    const json muted = h.status();
+    CHECK(muted.at("muted").get<bool>());
+    CHECK(!muted.at("bitPerfect").get<bool>());
+    h.call("player.setMuted", {{"muted", false}});
+    CHECK(h.status().at("bitPerfect").get<bool>());
+
+    h.call("player.setMuted", {{"muted", true}});
+    h.call("player.setVolume", {{"db", -3.0}});  // moving the slider means wanting to hear it
+    CHECK(!h.status().at("muted").get<bool>());
+}
+
+TEST(controller_applies_replay_gain_while_playing_and_reports_it) {
+    Harness h;
+    const std::filesystem::path path = h.music / L"pista.wav";
+    write_wav(path, 30.0);
+    {
+        TagLib::FileRef file(path.c_str());
+        TagLib::PropertyMap properties = file.properties();
+        properties.replace("REPLAYGAIN_TRACK_GAIN", TagLib::StringList("-6.00 dB"));
+        file.setProperties(properties);
+        file.save();
+    }
+    h.open();
+    CHECK(h.devices_ready());
+    h.call("library.addFolder", {{"path", path_to_utf8(h.music)}});
+    CHECK(h.until([&] { return !h.call("library.tracks").empty(); }));
+
+    h.call("devices.select", {{"key", "asio:{asio}"}});
+    const std::vector<int64_t> ids{h.call("library.tracks").at(0).at("id").get<int64_t>()};
+    h.call("queue.play", {{"tracks", ids}});
+    CHECK(h.until([&] { return h.status().at("bitPerfect").get<bool>(); }));
+    CHECK_NEAR(h.status().at("trackGainDb").get<double>(), 0.0, 1e-9);
+
+    h.call("player.setReplayGain", {{"mode", "track"}});
+    CHECK(h.until([&] { return std::abs(h.status().at("trackGainDb").get<double>() + 6.0) < 1e-6; }));
+    CHECK(!h.status().at("bitPerfect").get<bool>());
+    CHECK(h.call("app.state").at("replayGain") == "track");
+
+    h.call("player.setReplayGain", {{"mode", "off"}});
+    CHECK(h.until([&] { return h.status().at("bitPerfect").get<bool>(); }));
+    CHECK(load_settings(h.data / "settings.json").replay_gain == "off");
+}
+
+TEST(controller_applies_replay_gain_from_the_first_play_of_a_stopped_queue) {
+    Harness h;
+    const std::filesystem::path path = h.music / L"pista.wav";
+    write_wav(path, 30.0);
+    {
+        TagLib::FileRef file(path.c_str());
+        TagLib::PropertyMap properties = file.properties();
+        properties.replace("REPLAYGAIN_TRACK_GAIN", TagLib::StringList("-3.00 dB"));
+        file.setProperties(properties);
+        file.save();
+    }
+    h.open();
+    CHECK(h.devices_ready());
+    h.call("library.addFolder", {{"path", path_to_utf8(h.music)}});
+    CHECK(h.until([&] { return !h.call("library.tracks").empty(); }));
+
+    h.call("player.setReplayGain", {{"mode", "track"}});
+    const std::vector<int64_t> ids{h.call("library.tracks").at(0).at("id").get<int64_t>()};
+    h.call("queue.play", {{"tracks", ids}});
+    CHECK(h.until([&] { return std::abs(h.status().at("trackGainDb").get<double>() + 3.0) < 1e-6; }));
+}
+
 TEST(settings_round_trip) {
     Harness h;
     Settings settings;
     settings.device = "asio:{x}";
     settings.devices["asio:{x}"].dop_confirmed = true;
     settings.devices["asio:{x}"].dsd_gain_db = 1.5;
+    settings.devices["asio:{x}"].volume_db = -18.5;
     settings.sacd_multichannel = true;
     settings.repeat = "track";
+    settings.replay_gain = "album";
     settings.queue_index = 7;
     settings.queue_position = 12.5;
     settings.window = WindowPlacement{10, 20, 1000, 800, true};
@@ -668,6 +795,7 @@ TEST(settings_round_trip) {
     CHECK(loaded.devices.at("asio:{x}") == settings.devices.at("asio:{x}"));
     CHECK(loaded.sacd_multichannel);
     CHECK(loaded.repeat == "track");
+    CHECK(loaded.replay_gain == "album");
     CHECK(loaded.queue_index == 7);
     CHECK_NEAR(loaded.queue_position, 12.5, 1e-9);
     CHECK(loaded.window && loaded.window->maximized && loaded.window->width == 1000);

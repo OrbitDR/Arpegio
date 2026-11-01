@@ -152,6 +152,10 @@ void Pipeline::emit_pcm(double* samples, size_t frames, std::vector<uint8_t>& ou
     frames -= skip;
     if (frames == 0) return;
 
+    if (track_gain_ != 1.0) {
+        for (size_t i = 0; i < frames * source_.channels; ++i) samples[i] *= track_gain_;
+    }
+
     double* current = samples;
     if (plan_.mix_channels) {
         mix_channels(samples, frames);
@@ -246,6 +250,11 @@ void Pipeline::reset() {
     }
     if (dop_) dop_->reset();
     if (resampler_) resampler_->clear();
+}
+
+void Pipeline::set_track_gain(double gain) {
+    track_gain_ = gain;
+    if (quantizer_) quantizer_->set_dither_bits(gain == 1.0 ? plan_.dither_bits : plan_.gain_dither_bits);
 }
 
 }  // namespace arpegio

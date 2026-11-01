@@ -21,12 +21,13 @@ struct CueTrack {
     uint64_t start = 0;  // INDEX 01, within `file`
     uint64_t end = 0;    // INDEX 01 of the next track in the same file, 0 for the end of the file
     bool pre_emphasis = false;
+    std::map<std::string, std::string> rem;  // the REM lines of this track, keys in upper case
 };
 
 struct CueSheet {
     std::string title;
     std::string performer;
-    std::map<std::string, std::string> rem;  // keys in upper case
+    std::map<std::string, std::string> rem;  // all the REM lines, keys in upper case
     std::vector<CueTrack> tracks;            // audio tracks only
 };
 

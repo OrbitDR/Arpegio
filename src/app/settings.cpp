@@ -21,6 +21,7 @@ DeviceSettings read_device(const json& node) {
     device.first_channel = node.value("firstChannel", defaults.first_channel);
     device.period_ms = node.value("periodMs", defaults.period_ms);
     device.buffer_frames = node.value("bufferFrames", defaults.buffer_frames);
+    device.volume_db = node.value("volumeDb", defaults.volume_db);
     return device;
 }
 
@@ -30,7 +31,8 @@ json write_device(const DeviceSettings& device) {
             {"dsdGainDb", device.dsd_gain_db},
             {"firstChannel", device.first_channel},
             {"periodMs", device.period_ms},
-            {"bufferFrames", device.buffer_frames}};
+            {"bufferFrames", device.buffer_frames},
+            {"volumeDb", device.volume_db}};
 }
 
 }  // namespace
@@ -44,6 +46,7 @@ Settings load_settings(const std::filesystem::path& file) {
         settings.device = root.value("device", settings.device);
         settings.sacd_multichannel = root.value("sacdMultichannel", settings.sacd_multichannel);
         settings.repeat = root.value("repeat", settings.repeat);
+        settings.replay_gain = root.value("replayGain", settings.replay_gain);
         settings.queue_index = root.value("queueIndex", settings.queue_index);
         settings.queue_position = root.value("queuePosition", settings.queue_position);
         if (const auto devices = root.find("devices"); devices != root.end()) {
@@ -68,6 +71,7 @@ void save_settings(const std::filesystem::path& file, const Settings& settings) 
     json root = {{"device", settings.device},
                  {"sacdMultichannel", settings.sacd_multichannel},
                  {"repeat", settings.repeat},
+                 {"replayGain", settings.replay_gain},
                  {"queueIndex", settings.queue_index},
                  {"queuePosition", settings.queue_position},
                  {"devices", json::object()}};

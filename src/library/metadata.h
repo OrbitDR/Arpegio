@@ -3,10 +3,27 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace arpegio {
+
+// What the ReplayGain tags say, empty where they say nothing. Peaks are linear, with 1 at full scale.
+struct ReplayGainTags {
+    std::optional<double> track_gain_db;
+    std::optional<double> track_peak;
+    std::optional<double> album_gain_db;
+    std::optional<double> album_peak;
+
+    bool operator==(const ReplayGainTags&) const = default;
+};
+
+// Tag values such as "-6.54 dB" and "0.988", in the same form in files and in CUE sheets. Empty when the
+// value makes no sense, because a wrong gain is worse than none.
+std::optional<double> parse_replay_gain(std::string_view text);
+std::optional<double> parse_replay_peak(std::string_view text);
 
 struct Metadata {
     std::string title;
@@ -23,6 +40,7 @@ struct Metadata {
     int year = 0;
     int bitrate = 0;  // kbit/s
     bool compilation = false;
+    ReplayGainTags replay_gain;
     std::vector<uint8_t> artwork;
 };
 

@@ -274,6 +274,7 @@ private:
         track.disc_number = metadata.disc_number ? metadata.disc_number : disc_folder_number(file.path.parent_path());
         track.year = metadata.year;
         track.bitrate = metadata.bitrate;
+        track.replay_gain = metadata.replay_gain;
         return track;
     }
 
@@ -398,7 +399,23 @@ private:
         track.genre = first_nonempty({&metadata.genre, &rem_genre});
         if (track.year == 0) track.year = std::atoi(rem_value(sheet, "DATE").c_str());
         if (track.disc_number == 0) track.disc_number = std::atoi(rem_value(sheet, "DISCNUMBER").c_str());
+        apply_cue_replay_gain(sheet, cue_track, track.replay_gain);
         add(std::move(track), read.artwork, cue_path, cue.stamp);
+    }
+
+    // Lines in the sheet describe the track, or the album, better than tags on a file that holds them all.
+    static void apply_cue_replay_gain(const CueSheet& sheet, const CueTrack& track, ReplayGainTags& tags) {
+        const auto overlay = [](std::optional<double>& value, std::optional<double> line) {
+            if (line) value = line;
+        };
+        const auto track_rem = [&track](const char* key) {
+            const auto found = track.rem.find(key);
+            return found == track.rem.end() ? std::string() : found->second;
+        };
+        overlay(tags.track_gain_db, parse_replay_gain(track_rem("REPLAYGAIN_TRACK_GAIN")));
+        overlay(tags.track_peak, parse_replay_peak(track_rem("REPLAYGAIN_TRACK_PEAK")));
+        overlay(tags.album_gain_db, parse_replay_gain(rem_value(sheet, "REPLAYGAIN_ALBUM_GAIN")));
+        overlay(tags.album_peak, parse_replay_peak(rem_value(sheet, "REPLAYGAIN_ALBUM_PEAK")));
     }
 
     void scan_audio(const FoundFile& file) {

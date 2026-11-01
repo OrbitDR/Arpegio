@@ -650,7 +650,7 @@ TEST(scan_marks_mqa_files_and_their_cue_tracks) {
     for (const Track& track : tracks) CHECK(track.mqa == (track.relative_path != "plain.wav"));
 }
 
-TEST(older_catalogues_read_their_lossless_files_again) {
+TEST(older_catalogues_read_their_files_again) {
     TempFolder folder;
     const fs::path music = folder.music();
     write_sync_wav(music / "sync.wav", 16, 3);
@@ -671,17 +671,22 @@ TEST(older_catalogues_read_their_lossless_files_again) {
         mp3.format = {false, kRate, 2, 16, kRate};
         store.upsert_track(root, mp3, 0, nullptr);
 
-        // Version 1 had no such column, and nothing in it says which files are MQA.
-        store.database().exec("ALTER TABLE tracks DROP COLUMN is_mqa");
+        // Version 1 had none of these columns, and nothing in it says what they would hold.
+        store.database().exec(
+            "ALTER TABLE tracks DROP COLUMN is_mqa;"
+            "ALTER TABLE tracks DROP COLUMN rg_track_gain;"
+            "ALTER TABLE tracks DROP COLUMN rg_track_peak;"
+            "ALTER TABLE tracks DROP COLUMN rg_album_gain;"
+            "ALTER TABLE tracks DROP COLUMN rg_album_peak;");
         store.database().set_user_version(1);
     }
 
     LibraryStore store(folder.database());
-    CHECK(store.schema_version() == 2);
+    CHECK(store.schema_version() == 3);
     CHECK(!store.track(id)->mqa);
     const std::map<std::string, KnownFile> known = store.known_files(root);
     CHECK(known.at("sync.wav").stamp.modified == 0);
-    CHECK(known.at("lossy.mp3").stamp.modified == 7);
+    CHECK(known.at("lossy.mp3").stamp.modified == 0);
 
     const ScanResult result = scan_folder(store, artwork, music);
     CHECK(result.unchanged == 0);
@@ -749,12 +754,12 @@ TEST(store_keeps_its_schema_across_opens) {
     TempFolder folder;
     {
         LibraryStore store(folder.database());
-        CHECK(store.schema_version() == 2);
+        CHECK(store.schema_version() == 3);
         store.add_folder(folder.music());
     }
     {
         LibraryStore store(folder.database());
-        CHECK(store.schema_version() == 2);
+        CHECK(store.schema_version() == 3);
         CHECK(store.folders().size() == 1);
         CHECK(store.add_folder(folder.music()) == store.folders()[0].id);
         store.database().set_user_version(99);
@@ -766,6 +771,130 @@ TEST(store_keeps_its_schema_across_opens) {
         threw = true;
     }
     CHECK(threw);
+}
+
+TEST(replay_gain_values_are_read_as_taggers_write_them) {
+    CHECK_NEAR(*parse_replay_gain("-6.54 dB"), -6.54, 1e-9);
+    CHECK_NEAR(*parse_replay_gain("+3.20 dB"), 3.2, 1e-9);
+    CHECK_NEAR(*parse_replay_gain("-6,54 dB"), -6.54, 1e-9);
+    CHECK_NEAR(*parse_replay_gain("0"), 0.0, 1e-9);
+    CHECK(!parse_replay_gain("").has_value());
+    CHECK(!parse_replay_gain("loud").has_value());
+    CHECK(!parse_replay_gain("-99 dB").has_value());
+    CHECK(!parse_replay_gain("nan").has_value());
+
+    CHECK_NEAR(*parse_replay_peak("0.988553"), 0.988553, 1e-9);
+    CHECK_NEAR(*parse_replay_peak("1,25"), 1.25, 1e-9);
+    CHECK(!parse_replay_peak("0.000000").has_value());
+    CHECK(!parse_replay_peak("-1").has_value());
+    CHECK(!parse_replay_peak("").has_value());
+}
+
+TEST(replay_gain_tags_come_from_the_file) {
+    TempFolder folder;
+    const fs::path path = folder.music() / "one.flac";
+    write_text(path, encode_flac(kRate));
+    {
+        TagLib::FileRef file(path.c_str());
+        TagLib::PropertyMap properties = file.properties();
+        properties.replace("REPLAYGAIN_TRACK_GAIN", TagLib::StringList("-6.54 dB"));
+        properties.replace("REPLAYGAIN_TRACK_PEAK", TagLib::StringList("0.950000"));
+        properties.replace("REPLAYGAIN_ALBUM_GAIN", TagLib::StringList("+1.25 dB"));
+        file.setProperties(properties);
+        file.save();
+    }
+
+    const ReplayGainTags tags = read_metadata(path).replay_gain;
+    CHECK_NEAR(*tags.track_gain_db, -6.54, 1e-9);
+    CHECK_NEAR(*tags.track_peak, 0.95, 1e-9);
+    CHECK_NEAR(*tags.album_gain_db, 1.25, 1e-9);
+    CHECK(!tags.album_peak.has_value());
+
+    LibraryStore store(folder.database());
+    ArtworkCache artwork(folder.cache());
+    scan_folder(store, artwork, folder.music());
+    CHECK(store.tracks().at(0).replay_gain == tags);
+}
+
+TEST(a_file_without_those_tags_keeps_them_empty) {
+    TempFolder folder;
+    write_wav(folder.music() / "plain.wav", kRate);
+    LibraryStore store(folder.database());
+    ArtworkCache artwork(folder.cache());
+    scan_folder(store, artwork, folder.music());
+    CHECK(store.tracks().at(0).replay_gain == ReplayGainTags{});
+}
+
+TEST(cue_lines_say_more_about_replay_gain_than_the_tags_of_the_whole_file) {
+    TempFolder folder;
+    const fs::path music = folder.music();
+    write_wav(music / "album.wav", kCueAlbumFrames);
+    write_text(music / "album.cue",
+               "REM REPLAYGAIN_ALBUM_GAIN -7.50 dB\n"
+               "REM REPLAYGAIN_ALBUM_PEAK 0.950000\n"
+               "FILE \"album.wav\" WAVE\n"
+               "  TRACK 01 AUDIO\n"
+               "    REM REPLAYGAIN_TRACK_GAIN -6.00 dB\n"
+               "    REM REPLAYGAIN_TRACK_PEAK 0.900000\n"
+               "    INDEX 01 00:00:00\n"
+               "  TRACK 02 AUDIO\n"
+               "    REM REPLAYGAIN_TRACK_GAIN -3.00 dB\n"
+               "    INDEX 01 00:00:05\n");
+
+    LibraryStore store(folder.database());
+    ArtworkCache artwork(folder.cache());
+    scan_folder(store, artwork, music);
+    std::map<int, ReplayGainTags> tags;
+    for (const Track& track : store.tracks()) tags[track.part] = track.replay_gain;
+    CHECK(tags.size() == 2);
+    CHECK_NEAR(*tags.at(1).track_gain_db, -6.0, 1e-9);
+    CHECK_NEAR(*tags.at(1).track_peak, 0.9, 1e-9);
+    CHECK_NEAR(*tags.at(2).track_gain_db, -3.0, 1e-9);
+    CHECK(!tags.at(2).track_peak.has_value());
+    for (const auto& [part, track_tags] : tags) {
+        CHECK_NEAR(*track_tags.album_gain_db, -7.5, 1e-9);
+        CHECK_NEAR(*track_tags.album_peak, 0.95, 1e-9);
+    }
+}
+
+TEST(replay_gain_follows_the_mode) {
+    ReplayGainTags tags;
+    tags.track_gain_db = -6.0;
+    tags.album_gain_db = -12.0;
+    CHECK(replay_gain_factor(tags, ReplayGainMode::Off) == 1.0);
+    CHECK_NEAR(replay_gain_factor(tags, ReplayGainMode::Track), std::pow(10.0, -6.0 / 20.0), 1e-12);
+    CHECK_NEAR(replay_gain_factor(tags, ReplayGainMode::Album), std::pow(10.0, -12.0 / 20.0), 1e-12);
+
+    tags.album_gain_db.reset();
+    CHECK_NEAR(replay_gain_factor(tags, ReplayGainMode::Album), std::pow(10.0, -6.0 / 20.0), 1e-12);
+}
+
+TEST(replay_gain_never_takes_a_track_past_full_scale) {
+    ReplayGainTags tags;
+    tags.track_gain_db = 6.0;
+    CHECK(replay_gain_factor(tags, ReplayGainMode::Track) == 1.0);  // no peak to go by
+    tags.track_peak = 0.9;
+    CHECK_NEAR(replay_gain_factor(tags, ReplayGainMode::Track), 1.0 / 0.9, 1e-12);
+    tags.track_peak = 0.1;
+    CHECK_NEAR(replay_gain_factor(tags, ReplayGainMode::Track), std::pow(10.0, 6.0 / 20.0), 1e-12);
+    tags.track_gain_db = -1.0;
+    tags.track_peak = 1.3;  // even a gain that lowers the level can leave a peak above full scale
+    CHECK_NEAR(replay_gain_factor(tags, ReplayGainMode::Track), 1.0 / 1.3, 1e-12);
+}
+
+TEST(replay_gain_without_tags_leaves_the_track_alone) {
+    CHECK(replay_gain_factor({}, ReplayGainMode::Track) == 1.0);
+    CHECK(replay_gain_factor({}, ReplayGainMode::Album) == 1.0);
+    ReplayGainTags zero;
+    zero.track_gain_db = 0.0;
+    CHECK(replay_gain_factor(zero, ReplayGainMode::Track) == 1.0);
+}
+
+TEST(queue_items_carry_the_gain_of_the_mode) {
+    Track track;
+    track.replay_gain.track_gain_db = -6.0;
+    CHECK(make_queue_item(track).gain == 1.0);
+    CHECK_NEAR(make_queue_item(track, ReplayGainMode::Track).gain, std::pow(10.0, -6.0 / 20.0), 1e-12);
 }
 
 TEST(scan_catalogues_files_and_cue_tracks) {

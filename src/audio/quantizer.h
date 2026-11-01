@@ -16,6 +16,9 @@ public:
 
     void convert(const double* samples, size_t count, uint8_t* out);
 
+    // Takes effect from the next sample, so a stream can keep its random sequence across tracks.
+    void set_dither_bits(int dither_bits);
+
     uint64_t clipped() const { return clipped_; }
 
 private:
@@ -26,5 +29,8 @@ private:
     uint64_t rng_ = 0x9E3779B97F4A7C15ull;
     uint64_t clipped_ = 0;
 };
+
+// The inverse of Quantizer::convert for PCM encodings. Every value comes back exactly.
+void read_wire_samples(const uint8_t* bytes, WireEncoding encoding, double* samples, size_t count);
 
 }  // namespace arpegio

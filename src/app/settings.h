@@ -17,6 +17,7 @@ struct DeviceSettings {
     int first_channel = 0;
     uint32_t period_ms = 0;  // WASAPI exclusive, 0 keeps the default
     int buffer_frames = 0;   // ASIO, 0 keeps the driver's preferred size
+    double volume_db = 0.0;  // software volume; 0 is untouched and each device keeps its own
 
     bool operator==(const DeviceSettings&) const = default;
 };
@@ -34,6 +35,7 @@ struct Settings {
     std::map<std::string, DeviceSettings> devices;
     bool sacd_multichannel = false;
     std::string repeat = "off";  // off, queue or track
+    std::string replay_gain = "off";  // off, track or album
     size_t queue_index = 0;
     double queue_position = 0.0;
     std::optional<WindowPlacement> window;

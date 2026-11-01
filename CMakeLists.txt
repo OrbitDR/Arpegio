@@ -120,6 +120,7 @@ add_library(arpegio_core STATIC
     src/formats/wav_writer.cpp
     src/audio/ring_buffer.cpp
     src/audio/quantizer.cpp
+    src/audio/volume.cpp
     src/decode/decoder.cpp
     src/decode/dsf_decoder.cpp
     src/decode/dff_decoder.cpp
@@ -205,6 +206,7 @@ add_executable(arpegio-tests
     tests/test_dsd_plan.cpp
     tests/test_dsd_fir.cpp
     tests/test_quantizer.cpp
+    tests/test_volume.cpp
     tests/test_render_plan.cpp
     tests/test_player.cpp
     tests/test_library.cpp

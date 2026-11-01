@@ -623,3 +623,219 @@ TEST(dsd_to_pcm_keeps_the_length) {
     // One second of DSD must give one second of PCM, plus the capture's trailing silence.
     CHECK(f.capture->size() >= 352800u * 8);
 }
+
+namespace {
+
+constexpr int64_t kRampUnit = 256;  // one 24-bit step of the ramp in a 32-bit word
+
+// Where the ramp starts in the capture, whatever the silence before it.
+size_t first_sound(const std::vector<int32_t>& samples) {
+    size_t start = 0;
+    while (start < samples.size() && samples[start] == 0) ++start;
+    return start;
+}
+
+}  // namespace
+
+TEST(the_volume_is_heard_at_once_and_unity_is_bit_exact_again) {
+    Fixture f;
+    f.player.set_queue({ramp(1, 96000 * 40)});
+    f.player.play();
+    CHECK(wait_for_position(f.player, 0.5));
+    CHECK(f.player.status().bit_perfect);
+
+    f.player.set_volume(0.5);
+    CHECK(!f.player.status().bit_perfect);
+    const double lowered_at = f.player.status().position_seconds;
+    CHECK(wait_for_position(f.player, lowered_at + 1.0));
+
+    f.player.set_volume(1.0);
+    CHECK(f.player.status().bit_perfect);
+    const double raised_at = f.player.status().position_seconds;
+    CHECK(wait_for_position(f.player, raised_at + 1.0));
+    f.player.stop();
+    CHECK(f.player.wait_until_stopped(5000));
+    CHECK(f.player.status().error.empty());
+
+    // Every frame is compared with the ramp it came from, so a level that arrived late would show.
+    const auto samples = f.samples();
+    const size_t start = first_sound(samples);
+    size_t exact = 0;
+    size_t exact_after_halved = 0;
+    size_t halved = 0;
+    size_t other = 0;
+    for (size_t at = start; at + 1 < samples.size(); at += 2) {
+        const int64_t expected = static_cast<int64_t>((at - start) / 2 + 1) * kRampUnit;
+        const int64_t got = samples[at];
+        if (got == expected && samples[at + 1] == -got) {
+            ++exact;
+            if (halved > 0) ++exact_after_halved;
+        } else if (std::llabs(got - expected / 2) <= 2 * kRampUnit) {
+            ++halved;
+        } else {
+            ++other;
+        }
+    }
+    CHECK(halved > 96000 / 2);
+    CHECK(exact_after_halved > 96000 / 2);
+    CHECK(exact > 96000);
+    // Two ramps of 20 ms at 96 kHz are all that is neither one level nor the other.
+    CHECK(other <= 2 * 1920);
+}
+
+TEST(a_stream_that_opens_with_the_volume_down_never_plays_loud) {
+    Fixture f;
+    f.player.set_volume(0.25);
+    f.player.set_queue({ramp(1 << 20, 96000)});
+    f.player.play();
+    CHECK(f.player.wait_until_stopped(30000));
+
+    const auto samples = f.samples();
+    const size_t start = first_sound(samples);
+    CHECK(start < samples.size());
+    const int64_t expected = (1 << 20) * kRampUnit / 4;
+    CHECK(std::llabs(samples[start] - expected) <= 2 * kRampUnit);
+}
+
+TEST(dsd_is_converted_while_the_volume_is_down) {
+    Fixture f;
+    f.player.set_volume(0.5);
+    QueueItem item;
+    item.open = [] { return std::make_unique<DsdPatternDecoder>(2822400, 2822400 / 8 * 2); };
+    f.player.set_queue({item});
+    f.player.play();
+    while (!f.player.status().stream_open) Sleep(1);
+    CHECK(f.player.status().plan.path == RenderPath::DsdToPcm);
+    CHECK(!f.player.status().bit_perfect);
+    f.player.stop();
+    CHECK(f.player.wait_until_stopped(5000));
+}
+
+TEST(native_dsd_is_left_alone_if_the_volume_moves_under_it) {
+    Fixture f;
+    QueueItem item;
+    item.open = [] { return std::make_unique<DsdPatternDecoder>(2822400, 2822400 / 8 * 6); };
+    f.player.set_queue({item});
+    f.player.play();
+    CHECK(wait_for_position(f.player, 0.1));
+    CHECK(f.player.status().plan.path == RenderPath::DsdNative);
+    f.player.set_volume(0.5);
+    CHECK(f.player.status().bit_perfect);
+    CHECK(f.player.wait_until_stopped(30000));
+
+    size_t start = 0;
+    const auto& bytes = *f.capture;
+    while (start + 1 < bytes.size() && !(bytes[start] == 0 && bytes[start + 1] == 0xFF)) ++start;
+    CHECK(bytes.size() >= start + size_t{2822400} / 8 * 6 * 2);
+    bool exact = true;
+    for (size_t i = 0; i < 2822400 / 8 * 6 && exact; ++i) {
+        exact = bytes[start + i * 2] == static_cast<uint8_t>(i) && bytes[start + i * 2 + 1] == static_cast<uint8_t>(~i);
+    }
+    CHECK(exact);
+}
+
+TEST(a_gain_belongs_to_its_track_and_does_not_end_the_stream) {
+    CountingFixture f;
+    constexpr uint64_t kFrames = 96000;
+    QueueItem quieter = ramp(1, kFrames);
+    quieter.gain = 0.5;
+    f.player.set_queue({quieter, ramp(1 + kFrames, kFrames)});
+    f.player.play();
+    CHECK(f.player.wait_until_stopped(30000));
+    CHECK(f.player.status().error.empty());
+    CHECK(f.opened == 1);
+
+    std::vector<int32_t> samples(f.capture->size() / 4);
+    std::memcpy(samples.data(), f.capture->data(), samples.size() * 4);
+    const size_t start = first_sound(samples);
+    CHECK(samples.size() >= start + kFrames * 4);
+
+    bool first_scaled = true;
+    for (uint64_t frame = 0; frame < kFrames && first_scaled; ++frame) {
+        const int64_t expected = static_cast<int64_t>(frame + 1) * kRampUnit / 2;
+        first_scaled = std::llabs(samples[start + frame * 2] - expected) <= 2 * kRampUnit;
+    }
+    CHECK(first_scaled);
+
+    bool second_exact = true;
+    for (uint64_t frame = kFrames; frame < kFrames * 2 && second_exact; ++frame) {
+        second_exact = samples[start + frame * 2] == static_cast<int32_t>((frame + 1) * kRampUnit);
+    }
+    CHECK(second_exact);
+}
+
+TEST(status_follows_the_gain_of_the_track_being_heard) {
+    Fixture f;
+    constexpr uint64_t kFrames = 96000 * 4;
+    QueueItem scaled = ramp(1, kFrames);
+    scaled.gain = 0.5;
+    f.player.set_queue({scaled, ramp(kTrackTwo, kFrames)});
+    f.player.play();
+    hold_at_first_sound(f.player);
+    Sleep(50);  // the loader is on the second track by now, which must not show
+    CHECK_NEAR(f.player.status().track_gain, 0.5, 1e-12);
+    CHECK(!f.player.status().bit_perfect);
+    f.player.set_paused(false);
+    CHECK(wait_for_index(f.player, 1));
+    CHECK_NEAR(f.player.status().track_gain, 1.0, 1e-12);
+    CHECK(f.player.status().bit_perfect);
+    f.player.stop();
+    CHECK(f.player.wait_until_stopped(5000));
+}
+
+TEST(reload_applies_a_new_gain_from_the_position_heard) {
+    Fixture f;
+    constexpr uint64_t kFrames = 96000 * 30;
+    QueueItem item = ramp(1, kFrames);
+    item.id = 7;
+    f.player.set_queue({item});
+    f.player.play();
+    hold_at_first_sound(f.player);
+    const double heard = f.player.status().position_seconds;
+
+    item.gain = 0.5;
+    f.player.update_queue({item}, 0);
+    f.player.reload();
+    for (int i = 0; i < 2000 && f.player.status().track_gain == 1.0; ++i) Sleep(2);
+    CHECK_NEAR(f.player.status().track_gain, 0.5, 1e-12);
+    CHECK_NEAR(f.player.status().position_seconds, heard, 0.01);
+    f.player.stop();
+    CHECK(f.player.wait_until_stopped(5000));
+}
+
+namespace {
+
+class SilentDecoder final : public Decoder {
+public:
+    const SourceFormat& format() const override { return format_; }
+
+    size_t read_pcm(double* out, size_t frames) override {
+        const size_t count = static_cast<size_t>(std::min<uint64_t>(frames, format_.length - position_));
+        std::fill_n(out, count * 2, 0.0);
+        position_ += count;
+        return count;
+    }
+
+    void seek(uint64_t position) override { position_ = position; }
+
+private:
+    SourceFormat format_{false, 96000, 2, 24, 96000};
+    uint64_t position_ = 0;
+};
+
+}  // namespace
+
+TEST(a_gain_rewrites_the_samples_with_dither) {
+    Fixture f;
+    QueueItem item;
+    item.open = [] { return std::make_unique<SilentDecoder>(); };
+    item.gain = 0.5;
+    f.player.set_queue({item});
+    f.player.play();
+    CHECK(f.player.wait_until_stopped(30000));
+
+    // Digital silence through a gain still comes out with the 24-bit dither on top.
+    size_t nonzero = 0;
+    for (const int32_t sample : f.samples()) nonzero += sample != 0;
+    CHECK(nonzero > 96000);
+}

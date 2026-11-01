@@ -6,7 +6,11 @@
 namespace arpegio {
 
 Quantizer::Quantizer(WireEncoding encoding, int dither_bits) : encoding_(encoding) {
-    if (dither_bits > 0) dither_scale_ = std::ldexp(1.0, 1 - dither_bits);
+    set_dither_bits(dither_bits);
+}
+
+void Quantizer::set_dither_bits(int dither_bits) {
+    dither_scale_ = dither_bits > 0 ? std::ldexp(1.0, 1 - dither_bits) : 0.0;
 }
 
 double Quantizer::next_dither() {
@@ -78,6 +82,56 @@ void Quantizer::convert(const double* samples, size_t count, uint8_t* out) {
         break;
     case WireEncoding::F64:
         std::memcpy(out, samples, count * 8);
+        break;
+    default:
+        break;
+    }
+}
+
+void read_wire_samples(const uint8_t* bytes, WireEncoding encoding, double* samples, size_t count) {
+    switch (encoding) {
+    case WireEncoding::S16:
+        for (size_t i = 0; i < count; ++i, bytes += 2) {
+            int16_t value = 0;
+            std::memcpy(&value, bytes, 2);
+            samples[i] = value / 32768.0;
+        }
+        break;
+    case WireEncoding::S24:
+        for (size_t i = 0; i < count; ++i, bytes += 3) {
+            const uint32_t raw = static_cast<uint32_t>(bytes[0]) << 8 | static_cast<uint32_t>(bytes[1]) << 16 |
+                                 static_cast<uint32_t>(bytes[2]) << 24;
+            samples[i] = (static_cast<int32_t>(raw) >> 8) / 8388608.0;
+        }
+        break;
+    case WireEncoding::S32:
+        for (size_t i = 0; i < count; ++i, bytes += 4) {
+            int32_t value = 0;
+            std::memcpy(&value, bytes, 4);
+            samples[i] = value / 2147483648.0;
+        }
+        break;
+    case WireEncoding::S32Right24:
+    case WireEncoding::S32Right20:
+    case WireEncoding::S32Right18:
+    case WireEncoding::S32Right16: {
+        const double scale = std::ldexp(1.0, wire_resolution(encoding) - 1);
+        for (size_t i = 0; i < count; ++i, bytes += 4) {
+            int32_t value = 0;
+            std::memcpy(&value, bytes, 4);
+            samples[i] = value / scale;
+        }
+        break;
+    }
+    case WireEncoding::F32:
+        for (size_t i = 0; i < count; ++i, bytes += 4) {
+            float value = 0.0f;
+            std::memcpy(&value, bytes, 4);
+            samples[i] = value;
+        }
+        break;
+    case WireEncoding::F64:
+        std::memcpy(samples, bytes, count * 8);
         break;
     default:
         break;

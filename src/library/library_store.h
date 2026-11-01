@@ -16,6 +16,7 @@
 #include "decode/decoder.h"
 #include "library/artwork.h"
 #include "library/database.h"
+#include "library/metadata.h"
 
 namespace arpegio {
 
@@ -68,6 +69,7 @@ struct Track {
     int bitrate = 0;      // kbit/s
     bool pre_emphasis = false;
     bool mqa = false;
+    ReplayGainTags replay_gain;
 
     uint64_t range_start = 0;  // in `format` units; a range_end of 0 means the whole file
     uint64_t range_end = 0;

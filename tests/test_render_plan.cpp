@@ -187,3 +187,40 @@ TEST(mono_on_stereo_stays_bit_perfect) {
     CHECK(plan.device.channels == 1);
     CHECK(plan.bit_perfect);
 }
+
+TEST(a_volume_below_unity_converts_dsd_whatever_the_mode) {
+    for (const DsdPolicy mode : {DsdPolicy::Auto, DsdPolicy::Native, DsdPolicy::Dop}) {
+        PlaybackPolicy policy;
+        policy.dsd = mode;
+        policy.dop_confirmed = true;
+        policy.attenuated = true;
+        const RenderPlan plan = make_render_plan(dsd(kDsd64), topping_asio(), policy);
+        CHECK(plan.path == RenderPath::DsdToPcm);
+        CHECK(plan.accepts_gain());
+    }
+}
+
+TEST(a_volume_below_unity_leaves_pcm_as_it_was) {
+    PlaybackPolicy policy;
+    const RenderPlan full = make_render_plan(pcm(96000), topping_asio(), policy);
+    policy.attenuated = true;
+    CHECK(make_render_plan(pcm(96000), topping_asio(), policy) == full);
+}
+
+TEST(dsd_that_stays_dsd_takes_no_gain) {
+    PlaybackPolicy policy;
+    CHECK(!make_render_plan(dsd(kDsd64), topping_asio(), policy).accepts_gain());
+    policy.dsd = DsdPolicy::Dop;
+    CHECK(!make_render_plan(dsd(kDsd64), topping_asio(), policy).accepts_gain());
+}
+
+TEST(a_plan_without_dither_is_ready_to_dither_a_gain) {
+    const RenderPlan plan = make_render_plan(pcm(96000), topping_asio(), {});
+    CHECK(plan.bit_perfect);
+    CHECK(plan.dither_bits == 0);
+    CHECK(plan.gain_dither_bits == 24);
+
+    DeviceInfo sixteen = topping_asio();
+    sixteen.pcm_modes = {{44100, WireEncoding::S16, 16}};
+    CHECK(make_render_plan(pcm(44100, 16), sixteen, {}).gain_dither_bits == 16);
+}

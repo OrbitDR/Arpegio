@@ -17,6 +17,7 @@ import { favoritesView, playlistView, searchView, tracksView } from './views/tra
 const SEARCH_DELAY_MS = 180;
 const SCAN_REFRESH_MS = 4000;
 const SEEK_STEP_SECONDS = 10;
+const VOLUME_STEP_DB = 1;
 
 const ENGINE_MESSAGES = [
   [/cannot take this DSD rate natively/, 'Esta salida no acepta esta tasa DSD de forma nativa. Cambia el modo DSD en Ajustes.'],
@@ -87,6 +88,10 @@ function bindKeys() {
       call('player.next').catch(reportError);
     } else if (event.ctrlKey && event.key === 'ArrowLeft') {
       call('player.previous').catch(reportError);
+    } else if (event.ctrlKey && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
+      event.preventDefault();
+      const step = event.key === 'ArrowUp' ? VOLUME_STEP_DB : -VOLUME_STEP_DB;
+      call('player.setVolume', { db: (state.status?.volumeDb ?? 0) + step }).catch(reportError);
     } else if (event.shiftKey && (event.key === 'ArrowRight' || event.key === 'ArrowLeft')) {
       const step = event.key === 'ArrowRight' ? SEEK_STEP_SECONDS : -SEEK_STEP_SECONDS;
       call('player.seek', { seconds: Math.max(0, (state.status?.position ?? 0) + step) }).catch(reportError);

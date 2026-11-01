@@ -3,7 +3,7 @@ import { call } from './api.js';
 import { setFavorite } from './actions.js';
 import { h, icon, iconButton, setIcon } from './dom.js';
 import { reportError } from './feedback.js';
-import { shortFormat, time } from './format.js';
+import { decibels, shortFormat, time } from './format.js';
 import { cover } from './parts.js';
 import { currentRoute, go } from './router.js';
 import { currentTrack, selectedDevice, set, state, watch } from './store.js';
@@ -14,6 +14,8 @@ const REPEAT_LABELS = { off: 'Repetir: desactivado', queue: 'Repetir: cola', tra
 const DEVICE_HELD = 'Liberar el dispositivo. Se detiene la música y Reproducir continúa desde aquí';
 const DEVICE_FREE = 'Dispositivo libre. Se ocupa al reproducir';
 const DEVICE_SHARED = 'Modo compartido: el dispositivo sigue disponible para los demás programas';
+const VOLUME_FIXED = 'Con DSD nativo o DoP no hay volumen por software: usa el del DAC';
+const VOLUME_WHEEL_DB = 1;
 
 const send = (method, params) => call(method, params).catch(reportError);
 
@@ -21,6 +23,7 @@ export function createPlayerBar() {
   let shownTrack = undefined;
   let shownQuality = '';
   let dragging = false;
+  let draggingVolume = false;
   let holdUntil = 0;
 
   const art = h('button.bar-art', {
@@ -77,16 +80,64 @@ export function createPlayerBar() {
   const device = iconButton('device', DEVICE_FREE, () => send('devices.release'), { cls: 'bar-device' });
   const queueButton = iconButton('playlist', 'Cola de reproducción', () => set('queueOpen', !state.queueOpen));
 
+  const mute = iconButton('volume', 'Silenciar', () => send('player.setMuted', { muted: !state.status.muted }), { cls: 'bar-mute' });
+  const volume = h('input.slider.bar-volume', {
+    type: 'range',
+    min: -60,
+    max: 0,
+    step: 0.5,
+    value: 0,
+    ariaLabel: 'Volumen',
+    onpointerdown: () => {
+      draggingVolume = true;
+      addEventListener('pointerup', () => { draggingVolume = false; }, { once: true });
+    },
+    oninput: () => {
+      paintVolume();
+      send('player.setVolume', { db: Number(volume.value) });
+    },
+    onwheel: (event) => {
+      event.preventDefault();
+      if (volume.disabled) return;
+      const db = Number(volume.value) + (event.deltaY < 0 ? VOLUME_WHEEL_DB : -VOLUME_WHEEL_DB);
+      volume.value = db;
+      paintVolume();
+      send('player.setVolume', { db: Number(volume.value) });
+    },
+  });
+
   const bar = h('footer.player-bar',
     h('div.bar-left', art, h('div.bar-text', title, artist), favorite),
     h('div.bar-center',
       h('div.bar-buttons', shuffle, previous, toggle, next, repeat),
       h('div.bar-seek', elapsed, seek, remaining)),
-    h('div.bar-right', quality, device, queueButton));
+    h('div.bar-right', quality, device, mute, volume, queueButton));
 
   function paintSeek() {
     const max = Number(seek.max) || 1;
     seek.style.setProperty('--fill', `${(Number(seek.value) / max) * 100}%`);
+  }
+
+  function paintVolume() {
+    const floor = Number(volume.min);
+    volume.style.setProperty('--fill', `${((Number(volume.value) - floor) / -floor) * 100}%`);
+  }
+
+  function updateVolume(status) {
+    const fixed = status.plan !== null && !status.plan.acceptsGain;
+    mute.disabled = fixed;
+    volume.disabled = fixed;
+    if (!draggingVolume) {
+      volume.value = status.volumeDb;
+      paintVolume();
+    }
+    const silent = status.muted || status.volumeDb <= status.volumeFloorDb;
+    setIcon(mute, silent ? 'volumeOff' : status.volumeDb < -20 ? 'volumeLow' : 'volume');
+    mute.classList.toggle('on', status.muted);
+    const level = fixed ? VOLUME_FIXED : silent ? 'Volumen: silencio' : `Volumen: ${decibels(status.volumeDb)}`;
+    volume.title = level;
+    mute.title = fixed ? VOLUME_FIXED : status.muted ? 'Quitar el silencio' : 'Silenciar';
+    mute.ariaLabel = mute.title;
   }
 
   function update() {
@@ -142,6 +193,7 @@ export function createPlayerBar() {
     device.classList.toggle('on', status.deviceHeld);
     device.title = status.deviceHeld ? DEVICE_HELD : selectedDevice()?.kind === 'shared' ? DEVICE_SHARED : DEVICE_FREE;
     device.ariaLabel = device.title;
+    updateVolume(status);
   }
 
   watch('status', update);

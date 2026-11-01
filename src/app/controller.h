@@ -82,6 +82,9 @@ private:
     void adopt_devices(std::vector<DeviceInfo> devices);
     const DeviceInfo* selected_device() const;
     void apply_output();
+    void apply_volume();
+    void set_volume(double db);
+    void set_replay_gain(const std::string& mode);
     void release_device();
     DeviceSettings& settings_for(const std::string& key);
     nlohmann::json devices_json();
@@ -105,6 +108,8 @@ private:
     double resume_position_ = 0.0;
     std::optional<std::pair<size_t, double>> pending_start_;  // asked for before the devices were known
     bool was_active_ = false;
+    bool muted_ = false;  // not saved: starting silent would look like a fault
+    int volume_ticks_to_save_ = 0;  // a slider sends many changes, and the file only needs the last one
     nlohmann::json last_status_;
     nlohmann::json last_library_;
 

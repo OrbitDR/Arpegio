@@ -128,7 +128,10 @@ CueSheet parse_cue(std::string_view text) {
         ParsedTrack* current = parsed.empty() ? nullptr : &parsed.back();
 
         if (command == "REM") {
-            if (tokens.size() >= 2) sheet.rem[upper(tokens[1])] = join(tokens, 2);
+            if (tokens.size() >= 2) {
+                sheet.rem[upper(tokens[1])] = join(tokens, 2);
+                if (current) current->track.rem[upper(tokens[1])] = join(tokens, 2);
+            }
         } else if (command == "FILE") {
             if (tokens.size() < 2) throw fail("FILE without a name");
             if (have_file) ++file_index;

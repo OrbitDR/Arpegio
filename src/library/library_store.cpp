@@ -146,6 +146,15 @@ ALTER TABLE tracks ADD COLUMN is_mqa INTEGER NOT NULL DEFAULT 0;
 -- Only the audio tells, so the next scan reads again every lossless PCM file already catalogued.
 UPDATE tracks SET modified = 0 WHERE is_dsd = 0 AND codec NOT IN ('MP3', 'AAC', 'Vorbis', 'WMA');
 )SQL",
+    R"SQL(
+ALTER TABLE tracks ADD COLUMN rg_track_gain REAL;
+ALTER TABLE tracks ADD COLUMN rg_track_peak REAL;
+ALTER TABLE tracks ADD COLUMN rg_album_gain REAL;
+ALTER TABLE tracks ADD COLUMN rg_album_peak REAL;
+
+-- Any format can carry these tags, so the next scan reads again every file already catalogued.
+UPDATE tracks SET modified = 0;
+)SQL",
 };
 
 constexpr const char* kTrackQuery = R"SQL(
@@ -156,7 +165,8 @@ constexpr const char* kTrackQuery = R"SQL(
            t.range_start, t.range_end, t.sacd_area, t.sacd_track,
            COALESCE(t.artwork_id, 0), COALESCE(al.artwork_id, 0),
            EXISTS (SELECT 1 FROM favorites v WHERE v.track_id = t.track_id),
-           t.album_id, t.artist_id, t.is_mqa
+           t.album_id, t.artist_id, t.is_mqa,
+           t.rg_track_gain, t.rg_track_peak, t.rg_album_gain, t.rg_album_peak
     FROM tracks t
     JOIN folders f ON f.folder_id = t.folder_id
     JOIN artists ar ON ar.artist_id = t.artist_id
@@ -352,9 +362,9 @@ TrackId LibraryStore::upsert_track(FolderId folder, const Track& track, CueId cu
             .query(R"SQL(
         INSERT INTO tracks(folder_id, relative_path, part, file_size, modified, title, artist_id, album_artist_id, album_id,
                            composer, genre, comment, codec, track_no, disc_no, year, is_dsd, rate, channels, bits, length,
-                           bitrate, pre_emphasis, is_mqa, cue_id, range_start, range_end, sacd_area, sacd_track, artwork_id,
-                           added_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                           bitrate, pre_emphasis, is_mqa, rg_track_gain, rg_track_peak, rg_album_gain, rg_album_peak,
+                           cue_id, range_start, range_end, sacd_area, sacd_track, artwork_id, added_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(folder_id, relative_path, part) DO UPDATE SET
             file_size = excluded.file_size, modified = excluded.modified, title = excluded.title,
             artist_id = excluded.artist_id, album_artist_id = excluded.album_artist_id, album_id = excluded.album_id,
@@ -362,16 +372,20 @@ TrackId LibraryStore::upsert_track(FolderId folder, const Track& track, CueId cu
             genre = excluded.genre, comment = excluded.comment, codec = excluded.codec, track_no = excluded.track_no,
             disc_no = excluded.disc_no, year = excluded.year, is_dsd = excluded.is_dsd, rate = excluded.rate,
             channels = excluded.channels, bits = excluded.bits, length = excluded.length, bitrate = excluded.bitrate,
-            pre_emphasis = excluded.pre_emphasis, is_mqa = excluded.is_mqa, cue_id = excluded.cue_id,
-            range_start = excluded.range_start,
+            pre_emphasis = excluded.pre_emphasis, is_mqa = excluded.is_mqa,
+            rg_track_gain = excluded.rg_track_gain, rg_track_peak = excluded.rg_track_peak,
+            rg_album_gain = excluded.rg_album_gain, rg_album_peak = excluded.rg_album_peak,
+            cue_id = excluded.cue_id, range_start = excluded.range_start,
             range_end = excluded.range_end, sacd_area = excluded.sacd_area, sacd_track = excluded.sacd_track,
             artwork_id = excluded.artwork_id
         RETURNING track_id)SQL",
                    folder, track.relative_path, track.part, track.stamp.size, track.stamp.modified, title, artist_id,
                    album_artist_id, album_id, track.composer, track.genre, track.comment, track.codec, track.track_number,
                    track.disc_number, track.year, track.format.dsd, track.format.rate, track.format.channels,
-                   track.format.bits, track.format.length, track.bitrate, track.pre_emphasis, track.mqa, cue_id,
-                   track.range_start, track.range_end, track.sacd_area, track.sacd_track, artwork_id, now_seconds())
+                   track.format.bits, track.format.length, track.bitrate, track.pre_emphasis, track.mqa,
+                   track.replay_gain.track_gain_db, track.replay_gain.track_peak, track.replay_gain.album_gain_db,
+                   track.replay_gain.album_peak, cue_id, track.range_start, track.range_end, track.sacd_area,
+                   track.sacd_track, artwork_id, now_seconds())
             .single();
 
     database_.query("DELETE FROM tracks_fts WHERE rowid = ?", id).run();
@@ -450,6 +464,11 @@ void LibraryStore::touch_folder(FolderId folder) {
 }
 
 std::vector<Track> LibraryStore::read_tracks(Statement& statement) {
+    const auto optional_real = [&statement](int column) -> std::optional<double> {
+        if (statement.is_null(column)) return std::nullopt;
+        return statement.real(column);
+    };
+
     std::vector<Track> out;
     while (statement.step()) {
         Track track;
@@ -487,6 +506,7 @@ std::vector<Track> LibraryStore::read_tracks(Statement& statement) {
         track.album_id = statement.integer(32);
         track.artist_id = statement.integer(33);
         track.mqa = statement.integer(34) != 0;
+        track.replay_gain = {optional_real(35), optional_real(36), optional_real(37), optional_real(38)};
         out.push_back(std::move(track));
     }
     return out;

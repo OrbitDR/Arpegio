@@ -73,5 +73,6 @@ export async function connect() {
 
   const initial = await call('app.state');
   state.sacdMultichannel = initial.sacdMultichannel;
+  state.replayGain = initial.replayGain;
   for (const key of ['queue', 'status', 'library', 'folders', 'playlists', 'devices']) set(key, initial[key]);
 }

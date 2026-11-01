@@ -5,7 +5,7 @@ import { reportError, toast } from '../feedback.js';
 import { count, dsdName, kilohertz } from '../format.js';
 import { pageHeader, select } from '../parts.js';
 import { windowsVolumeWarning } from '../signal.js';
-import { state, watch } from '../store.js';
+import { set, state, watch } from '../store.js';
 
 const GROUPS = [
   ['asio', 'ASIO', 'Acceso directo al driver del DAC. Es la única vía para DSD nativo.'],
@@ -20,6 +20,13 @@ const DSD_MODES = {
   native: ['Nativo', 'Envía el flujo DSD tal cual. Falla con las tasas que el driver no admite.'],
   dop: ['DoP', 'Empaqueta el DSD dentro de muestras PCM. Si el DAC no lo entiende se oye ruido.'],
   pcm: ['Convertir a PCM', 'Filtra el DSD a PCM de alta resolución. Funciona con cualquier DAC.'],
+};
+const DSD_VOLUME_NOTE = 'Con el volumen por debajo de 0 dB, el DSD se convierte siempre a PCM: de otro modo sonaría a nivel completo.';
+
+const REPLAY_GAIN_MODES = {
+  off: ['Desactivado', 'Las pistas suenan al nivel con que se grabaron.'],
+  track: ['Por pista', 'Iguala el nivel de cada pista con sus etiquetas ReplayGain. La pista deja de ser bit-perfect.'],
+  album: ['Por álbum', 'Iguala el nivel entre álbumes y respeta las diferencias dentro de cada uno. La pista deja de ser bit-perfect.'],
 };
 
 const send = (method, params) => call(method, params).catch(reportError);
@@ -55,7 +62,7 @@ function deviceOptions(device) {
   if (modes.length) {
     const active = modes.includes(chosen.dsd) ? chosen.dsd : 'auto';
     rows.push(h('div.setting',
-      h('div.setting-text', h('strong', 'Reproducción de DSD'), h('p', DSD_MODES[active][1])),
+      h('div.setting-text', h('strong', 'Reproducción de DSD'), h('p', `${DSD_MODES[active][1]} ${DSD_VOLUME_NOTE}`)),
       h('div.segments', { role: 'radiogroup' }, modes.map((mode) => h('button.segment', {
         type: 'button',
         class: mode === active ? 'on' : '',
@@ -154,6 +161,29 @@ function outputSection() {
     body);
 }
 
+function playbackSection() {
+  const active = REPLAY_GAIN_MODES[state.replayGain] ? state.replayGain : 'off';
+  const choose = (mode) => {
+    state.replayGain = mode;
+    send('player.setReplayGain', { mode });
+    set('replayGain', mode);
+  };
+  return h('section.settings-section',
+    h('div.section-head', h('h2', 'Reproducción')),
+    h('div.settings-card',
+      h('div.setting',
+        h('div.setting-text',
+          h('strong', 'ReplayGain'),
+          h('p', `${REPLAY_GAIN_MODES[active][1]} Las pistas sin etiquetas no cambian, y una ganancia nunca lleva el pico por encima del máximo.`)),
+        h('div.segments', { role: 'radiogroup' }, Object.entries(REPLAY_GAIN_MODES).map(([mode, [label]]) => h('button.segment', {
+          type: 'button',
+          class: mode === active ? 'on' : '',
+          role: 'radio',
+          ariaChecked: mode === active,
+          onclick: () => choose(mode),
+        }, label))))));
+}
+
 function folderRow(folder) {
   return h('div.library-folder',
     icon('folder', 20),
@@ -222,7 +252,7 @@ export function settingsView(page) {
   const body = page.querySelector('.settings');
   const draw = () => {
     const open = [...body.querySelectorAll('details[open]')].length > 0;
-    body.replaceChildren(outputSection(), librarySection(),
+    body.replaceChildren(outputSection(), playbackSection(), librarySection(),
       h('section.settings-section.about', h('p.muted', 'Arpegio 0.1 · Software libre bajo licencia GPLv3')));
     if (open) body.querySelector('details')?.setAttribute('open', '');
   };
@@ -233,6 +263,7 @@ export function settingsView(page) {
   const stops = [
     watch('devices', draw),
     watch('folders', draw),
+    watch('replayGain', draw),
     watch('library', (library) => {
       if (wasScanning !== library.scanning) draw();
       else if (library.scanning) body.querySelector('.scan-status')?.replaceWith(scanStatus(library));

@@ -10,6 +10,7 @@
 #include <tvariant.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <fstream>
 #include <iterator>
@@ -25,6 +26,19 @@ constexpr const wchar_t* kCoverNames[] = {L"cover", L"folder",   L"front",   L"f
                                           L"album", L"albumart", L"artwork", L"portada"};
 constexpr const wchar_t* kCoverExtensions[] = {L".jpg", L".jpeg", L".png", L".bmp", L".webp"};
 constexpr const wchar_t* kScanFolders[] = {L"covers", L"cover", L"artwork", L"art", L"scans", L"scan"};
+
+constexpr double kMaxReplayGainDb = 51.0;  // what the format can store
+constexpr double kMaxReplayPeak = 16.0;    // inter-sample and encoder overshoots stay well below this
+
+// Decimal commas come from taggers running under a Spanish or German locale.
+std::optional<double> leading_number(std::string_view text) {
+    std::string copy(text);
+    std::replace(copy.begin(), copy.end(), ',', '.');
+    char* end = nullptr;
+    const double value = std::strtod(copy.c_str(), &end);
+    if (end == copy.c_str() || !std::isfinite(value)) return std::nullopt;
+    return value;
+}
 
 // Tags carry stray spaces often enough to split artists and albums that are really the same.
 std::string trimmed(std::string text) {
@@ -121,7 +135,25 @@ void read_picture(TagLib::FileRef& file, Metadata& metadata) {
     metadata.artwork.assign(data.begin(), data.end());
 }
 
+ReplayGainTags read_replay_gain(const TagLib::PropertyMap& properties) {
+    return {parse_replay_gain(first_value(properties, "REPLAYGAIN_TRACK_GAIN")),
+            parse_replay_peak(first_value(properties, "REPLAYGAIN_TRACK_PEAK")),
+            parse_replay_gain(first_value(properties, "REPLAYGAIN_ALBUM_GAIN")),
+            parse_replay_peak(first_value(properties, "REPLAYGAIN_ALBUM_PEAK"))};
+}
+
 }  // namespace
+
+std::optional<double> parse_replay_gain(std::string_view text) {
+    const std::optional<double> gain = leading_number(text);
+    return gain && std::abs(*gain) <= kMaxReplayGainDb ? gain : std::nullopt;
+}
+
+std::optional<double> parse_replay_peak(std::string_view text) {
+    // Some taggers write 0 for a peak they never measured.
+    const std::optional<double> peak = leading_number(text);
+    return peak && *peak > 0.0 && *peak <= kMaxReplayPeak ? peak : std::nullopt;
+}
 
 Metadata read_metadata(const std::filesystem::path& path) {
     Metadata metadata;
@@ -148,6 +180,7 @@ Metadata read_metadata(const std::filesystem::path& path) {
     metadata.cue_sheet = first_value(properties, "CUESHEET");
     metadata.disc_number = first_number(properties, "DISCNUMBER");
     metadata.compilation = first_number(properties, "COMPILATION") != 0;
+    metadata.replay_gain = read_replay_gain(properties);
     if (metadata.track_number == 0) metadata.track_number = first_number(properties, "TRACKNUMBER");
     if (metadata.year == 0) metadata.year = first_number(properties, "DATE");
 

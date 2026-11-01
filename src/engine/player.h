@@ -26,6 +26,7 @@ struct QueueItem {
     std::filesystem::path path;
     std::function<std::unique_ptr<Decoder>()> open;  // overrides `path` when set
     int64_t id = 0;                                  // tells tracks apart when the queue changes under them
+    double gain = 1.0;                               // for this track alone, as with ReplayGain
 };
 
 enum class PlayerState { Stopped, Playing, Paused };
@@ -39,7 +40,8 @@ struct PlayerStatus {
     std::string signal_path;
     bool stream_open = false;  // `plan` is valid
     RenderPlan plan;
-    bool bit_perfect = false;
+    bool bit_perfect = false;  // of what is being heard, with the volume and the track's gain at this moment
+    double track_gain = 1.0;   // the one being applied to what is being heard
     double hardware_gain_db = 0.0;  // of the device, read when playback started
     size_t buffered_bytes = 0;
     size_t ring_capacity = 0;
@@ -77,6 +79,14 @@ public:
     void previous();  // to the start of the track, or to the track before when already there
     void seek(double seconds);
 
+    // Heard within milliseconds, with no change to the stream. 1 leaves every byte alone and 0 is silence.
+    // Nothing above 1. It does not reach DSD that stays DSD, so while it is below 1 tracks in DSD are
+    // converted to PCM, including the next ones in a stream that was DSD when it was lowered.
+    void set_volume(double gain);
+
+    // Decodes what is being heard again, for a change of QueueItem::gain that must not wait for the ring.
+    void reload();
+
     void set_paused(bool paused);
     void stop();
 
@@ -97,11 +107,12 @@ private:
         size_t queue_index;
         double start_seconds;
         double duration_seconds;
+        double gain;
     };
 
     void worker();
     void run_queue(double start_seconds);
-    PumpResult pump(Decoder& decoder, const SourceFormat& source, int64_t track_id, std::optional<double> seek);
+    PumpResult pump(Decoder& decoder, const SourceFormat& source, const QueueItem& item, std::optional<double> seek);
     std::optional<double> take_jump();
     bool write_all(const std::vector<uint8_t>& bytes);
     void open_session(const RenderPlan& plan, const SourceFormat& source);
@@ -110,7 +121,8 @@ private:
     void reopen_output_if_needed();
     bool play_out(bool end_of_queue);
     bool drain(bool end_of_queue);
-    void add_segment(size_t index, double start_seconds, double duration_seconds);
+    void apply_track_gain(double gain);
+    void add_segment(double start_seconds, double duration_seconds);
     void set_error(const std::string& text);
     const Segment* heard_segment() const;  // these three need mutex_
     size_t heard_index() const;
@@ -145,6 +157,7 @@ private:
 
     std::atomic<bool> stop_flag_{false};
     std::atomic<bool> paused_{false};
+    std::atomic<double> volume_{1.0};
     std::atomic<uint64_t> clipped_{0};
     std::atomic<uint64_t> reopened_{0};
 
@@ -153,6 +166,7 @@ private:
     std::unique_ptr<Pipeline> pipeline_;
     SourceFormat pipeline_source_;
     RenderPlan plan_;
+    double track_gain_ = 1.0;  // what the pipeline applies, 1 in a stream that takes no gain
     std::vector<uint8_t> chunk_;
     bool output_started_ = false;
 

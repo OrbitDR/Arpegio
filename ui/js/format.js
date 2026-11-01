@@ -20,6 +20,13 @@ export function count(number, one, many) {
   return `${number.toLocaleString('es-ES')} ${number === 1 ? one : many}`;
 }
 
+// With a real minus sign, and a plus where a gain could go either way.
+export function decibels(value, { plus = false } = {}) {
+  const text = Math.abs(value).toFixed(1);
+  if (value < 0) return `−${text} dB`;
+  return `${plus && value > 0 ? '+' : ''}${text} dB`;
+}
+
 export function kilohertz(rate) {
   return (rate / 1000).toFixed(rate % 1000 ? 1 : 0).replace(/\.0$/, '');
 }

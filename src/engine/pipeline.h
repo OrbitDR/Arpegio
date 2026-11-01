@@ -30,6 +30,10 @@ public:
     // Forgets filter state, as after a seek.
     void reset();
 
+    // Scales what is decoded from here on, ahead of the filters so a tail stays at the level of its own
+    // track. It belongs to a track and not to the plan, because a different gain must not end the stream.
+    void set_track_gain(double gain);
+
     uint64_t clipped() const { return quantizer_ ? quantizer_->clipped() : 0; }
 
 private:
@@ -40,6 +44,7 @@ private:
     RenderPlan plan_;
     size_t chunk_ = 0;  // frames, or bytes per channel for DSD
     size_t drop_frames_ = 0;
+    double track_gain_ = 1.0;
 
     std::vector<std::vector<uint8_t>> planes_;
     std::vector<uint8_t*> plane_pointers_;

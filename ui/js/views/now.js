@@ -6,7 +6,7 @@ import { go } from '../router.js';
 import { currentTrack, state, watch } from '../store.js';
 import { signalPath } from '../signal.js';
 
-const REDRAW_KEYS = ['state', 'plan', 'bitPerfect', 'windowsGainDb', 'underruns', 'late', 'clipped'];
+const REDRAW_KEYS = ['state', 'plan', 'bitPerfect', 'volumeDb', 'muted', 'trackGainDb', 'windowsGainDb', 'underruns', 'late', 'clipped'];
 
 function signature(status) {
   const buffer = Math.round((status?.buffer ?? 0) * 20);

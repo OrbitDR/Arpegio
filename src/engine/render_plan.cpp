@@ -78,7 +78,8 @@ RenderPlan plan_pcm(const SourceFormat& source, const DeviceInfo& device, const 
     const bool mono_copy = source.channels == 1 && plan.device.channels == 2;
     const bool processed = plan.resample_from != 0 || (plan.mix_channels && !mono_copy);
     plan.bit_perfect = !processed && !reduces_depth && device.kind != OutputKind::WasapiShared && volume_is_neutral(device);
-    plan.dither_bits = (processed || reduces_depth) ? std::min(policy.dither_bits, wire_resolution(mode.encoding)) : 0;
+    plan.gain_dither_bits = std::min(policy.dither_bits, wire_resolution(mode.encoding));
+    plan.dither_bits = (processed || reduces_depth) ? plan.gain_dither_bits : 0;
     return plan;
 }
 
@@ -116,6 +117,7 @@ RenderPlan plan_conversion(const SourceFormat& source, const DeviceInfo& device,
     plan.mix_channels = plan.device.channels != source.channels;
     plan.gain = std::pow(10.0, policy.dsd_to_pcm_gain_db / 20.0);
     plan.dither_bits = std::min(policy.dither_bits, wire_resolution(mode->encoding));
+    plan.gain_dither_bits = plan.dither_bits;
     return plan;
 }
 
@@ -123,6 +125,9 @@ RenderPlan plan_conversion(const SourceFormat& source, const DeviceInfo& device,
 
 RenderPlan make_render_plan(const SourceFormat& source, const DeviceInfo& device, const PlaybackPolicy& policy) {
     if (!source.dsd) return plan_pcm(source, device, policy);
+
+    // Otherwise a DSD track after attenuated PCM would jump to full level, whatever mode was chosen.
+    if (policy.attenuated) return plan_conversion(source, device, policy);
 
     const bool channels_fit = source.channels <= device.channels;
     const bool native_ok = device.kind == OutputKind::Asio && channels_fit &&

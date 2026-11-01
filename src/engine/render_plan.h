@@ -19,6 +19,7 @@ struct PlaybackPolicy {
     bool dop_confirmed = false;  // the user verified that this DAC decodes DoP
     double dsd_to_pcm_gain_db = 3.0;
     int dither_bits = 24;
+    bool attenuated = false;  // the software volume is down, which DSD cannot follow while it stays DSD
 };
 
 enum class RenderPath { Pcm, DsdNative, DsdDop, DsdToPcm };
@@ -42,6 +43,10 @@ struct RenderPlan {
     bool mix_channels = false;  // source and device channel counts differ
     double gain = 1.0;
     int dither_bits = 0;
+    int gain_dither_bits = 0;  // once a volume or a track gain rewrites the samples
+
+    // DSD that stays DSD has no level to scale.
+    bool accepts_gain() const { return path == RenderPath::Pcm || path == RenderPath::DsdToPcm; }
 
     bool operator==(const RenderPlan& other) const {
         return path == other.path && device == other.device && resample_from == other.resample_from &&

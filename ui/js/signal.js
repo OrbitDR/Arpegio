@@ -1,24 +1,30 @@
 // The path the sound takes, stage by stage, in the terms an audio enthusiast expects to check.
 import { h, icon } from './dom.js';
-import { dsdName, formatLine, kilohertz } from './format.js';
+import { decibels, dsdName, formatLine, kilohertz } from './format.js';
 import { selectedDevice } from './store.js';
 
 const KIND_NAMES = { asio: 'ASIO', exclusive: 'WASAPI exclusivo', shared: 'WASAPI compartido' };
 
-function processingLines(plan, track) {
+function processingLines(plan, track, status) {
   switch (plan.path) {
     case 'dsdNative': return ['Ninguno: el flujo DSD llega intacto'];
     case 'dop': return ['Empaquetado DoP, sin tocar los bits DSD'];
     default: break;
   }
   const lines = [];
+  if (Math.abs(status.trackGainDb) > 0.005) lines.push(`ReplayGain de ${decibels(status.trackGainDb, { plus: true })}`);
   if (plan.path === 'dsdToPcm') {
     lines.push(`DSD a PCM: FIR ÷${plan.firDivider}, corte en ${kilohertz(plan.firCutoffHz)} kHz`);
-    if (Math.abs(plan.gainDb) > 0.01) lines.push(`Ganancia de ${plan.gainDb > 0 ? '+' : ''}${plan.gainDb.toFixed(1)} dB`);
+    if (Math.abs(plan.gainDb) > 0.01) lines.push(`Ganancia de ${decibels(plan.gainDb, { plus: true })}`);
   }
   if (plan.resampleFrom) lines.push(`Remuestreo r8brain: ${kilohertz(plan.resampleFrom)} a ${kilohertz(plan.rate)} kHz`);
   if (plan.mixChannels) lines.push(`Mezcla de ${track?.channels ?? '?'} a ${plan.channels} canales`);
-  if (plan.ditherBits) lines.push(`Dither TPDF a ${plan.ditherBits} bits`);
+  const volumeDown = status.muted || status.volumeDb < 0;
+  if (status.muted || status.volumeDb <= status.volumeFloorDb) lines.push('Volumen por software: silencio');
+  else if (volumeDown) lines.push(`Volumen por software: ${decibels(status.volumeDb)}`);
+  const gained = volumeDown || Math.abs(status.trackGainDb) > 0.005;
+  const dither = plan.ditherBits || (gained ? plan.gainDitherBits : 0);
+  if (dither) lines.push(`Dither TPDF a ${dither} bits`);
   return lines.length ? lines : ['Ninguno: las muestras llegan intactas'];
 }
 
@@ -58,7 +64,7 @@ export function signalPath(track, status) {
       h('p.signal-idle', 'Al reproducir se muestra lo que recibe el dispositivo.'));
   }
 
-  const lines = processingLines(plan, track);
+  const lines = processingLines(plan, track, status);
   const untouched = plan.path === 'dsdNative' || plan.path === 'dop' || lines[0].startsWith('Ninguno');
   return h('section.signal',
     h('div.signal-head',

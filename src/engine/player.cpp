@@ -9,6 +9,7 @@
 #include <cstring>
 #include <stdexcept>
 
+#include "audio/volume.h"
 #include "dsd/dop.h"
 #include "dsd/dsd_fir.h"
 
@@ -34,6 +35,11 @@ public:
     // The device may change the DSD bit order when it opens.
     void set_format(const DeviceFormat& format) { format_ = format; }
 
+    // Before the stream starts. Without it the bytes go out as they are.
+    void set_volume(const DeviceFormat& format, int dither_bits, const std::atomic<double>& gain) {
+        volume_.emplace(format, dither_bits, gain);
+    }
+
     void pull(uint8_t* destination, size_t frames) noexcept override {
         const size_t want = frames * format_.frame_bytes();
         size_t got = 0;
@@ -44,6 +50,7 @@ public:
             if (got < want && feeding.load(std::memory_order_acquire)) {
                 underruns.fetch_add(1, std::memory_order_relaxed);
             }
+            if (volume_) volume_->apply(destination, got / format_.frame_bytes());
         }
         if (got < want) fill_silence(destination + got, want - got);
         if (dop_) {
@@ -84,6 +91,7 @@ private:
     bool dop_;
     uint32_t dop_phase_ = 0;
     std::atomic<bool>& paused_;
+    std::optional<Volume> volume_;
 };
 
 Player::Player(OutputFactory factory) : factory_(std::move(factory)) {
@@ -186,6 +194,15 @@ void Player::previous() {
     jump_request_ = Jump{restart ? heard : heard - 1, 0.0};
 }
 
+void Player::set_volume(double gain) {
+    volume_.store(std::clamp(gain, 0.0, 1.0), std::memory_order_relaxed);
+}
+
+void Player::reload() {
+    std::lock_guard lock(mutex_);
+    if (active_ && !stop_requested()) jump_request_ = Jump{heard_index(), heard_position()};
+}
+
 void Player::set_paused(bool paused) {
     paused_.store(paused, std::memory_order_release);
 }
@@ -211,7 +228,6 @@ PlayerStatus Player::status() const {
                             : paused_.load(std::memory_order_acquire) ? PlayerState::Paused : PlayerState::Playing;
     status.error = error_;
     status.signal_path = signal_path_;
-    status.bit_perfect = bit_perfect_;
     status.hardware_gain_db = hardware_gain_db_;
     status.queue_index = heard_index();
     if (active_) status.position_seconds = heard_position();
@@ -228,7 +244,13 @@ PlayerStatus Player::status() const {
     status.plan = plan_;
 
     status.position_seconds = heard_position();
-    if (const Segment* current = heard_segment()) status.duration_seconds = current->duration_seconds;
+    const Segment* current = heard_segment();
+    if (current) {
+        status.duration_seconds = current->duration_seconds;
+        status.track_gain = current->gain;
+    }
+    const bool volume_scales = plan_.accepts_gain() && volume_.load(std::memory_order_relaxed) != 1.0;
+    status.bit_perfect = bit_perfect_ && !volume_scales && status.track_gain == 1.0;
     return status;
 }
 
@@ -260,9 +282,16 @@ void Player::set_error(const std::string& text) {
     error_ = text;
 }
 
-void Player::add_segment(size_t index, double start_seconds, double duration_seconds) {
+void Player::apply_track_gain(double gain) {
+    track_gain_ = plan_.accepts_gain() ? gain : 1.0;
+    pipeline_->set_track_gain(track_gain_);
+}
+
+// Reads the index here and not earlier: the queue can change while a decoder opens, and update_queue() only
+// moves this one.
+void Player::add_segment(double start_seconds, double duration_seconds) {
     std::lock_guard lock(mutex_);
-    segments_.push_back({session_->ring.total_written(), index, start_seconds, duration_seconds});
+    segments_.push_back({session_->ring.total_written(), loader_index_, start_seconds, duration_seconds, track_gain_});
     while (segments_.size() > 1 && segments_[1].ring_position <= session_->ring.total_read()) segments_.pop_front();
 }
 
@@ -286,6 +315,7 @@ void Player::open_session(const RenderPlan& plan, const SourceFormat& source) {
 
     plan_ = plan;
     plan_.device = actual;
+    if (plan_.accepts_gain()) session->set_volume(actual, plan_.gain_dither_bits, volume_);
     pipeline_ = std::make_unique<Pipeline>(source, plan_);
     pipeline_source_ = source;
     output_started_ = false;
@@ -377,21 +407,22 @@ std::optional<double> Player::take_jump() {
     return seconds;
 }
 
-Player::PumpResult Player::pump(Decoder& decoder, const SourceFormat& source, int64_t track_id,
+Player::PumpResult Player::pump(Decoder& decoder, const SourceFormat& source, const QueueItem& item,
                                 std::optional<double> seek) {
     const double bytes_per_second = static_cast<double>(plan_.device.frame_bytes()) * plan_.device.ring_frame_rate();
     uint64_t refill_target = 0;
+    double gain = item.gain;
     for (;;) {
         if (stop_requested()) return PumpResult::Stop;
-        size_t index = 0;
         {
             std::lock_guard lock(mutex_);
-            index = loader_index_;
+            const size_t index = loader_index_;
             if (jump_request_) {
                 // A changed queue can hold another track at this index, and the decoder only has its own.
-                const bool same_track = index < queue_.size() && queue_[index].id == track_id;
+                const bool same_track = index < queue_.size() && queue_[index].id == item.id;
                 if (jump_request_->index != index || !same_track) return PumpResult::Jump;
                 seek = jump_request_->seconds;
+                gain = queue_[index].gain;
                 jump_request_.reset();
             }
         }
@@ -402,7 +433,8 @@ Player::PumpResult Player::pump(Decoder& decoder, const SourceFormat& source, in
             session_->ring.discard();
             decoder.seek(static_cast<uint64_t>(units));
             pipeline_->reset();
-            add_segment(index, seconds, source.seconds());
+            apply_track_gain(gain);
+            add_segment(seconds, source.seconds());
             refill_target = session_->ring.total_written() + static_cast<uint64_t>(bytes_per_second * kSeekRefillSeconds);
             seek.reset();
         }
@@ -471,14 +503,12 @@ void Player::run_queue(double start_seconds) {
     for (;;) {
         QueueItem item;
         bool found = false;
-        size_t index = 0;
         {
             std::lock_guard lock(mutex_);
             const bool wraps = repeat_ == RepeatMode::Queue && !jumped && !queue_.empty();
             if (wraps && loader_index_ >= queue_.size()) loader_index_ = 0;
-            index = loader_index_;
-            found = index < queue_.size();
-            if (found) item = queue_[index];
+            found = loader_index_ < queue_.size();
+            if (found) item = queue_[loader_index_];
         }
 
         if (!found) {
@@ -492,6 +522,7 @@ void Player::run_queue(double start_seconds) {
 
         auto decoder = item.open ? item.open() : open_decoder(item.path);
         const SourceFormat source = decoder->format();
+        policy.attenuated = volume_.load(std::memory_order_relaxed) < 1.0;
         const RenderPlan plan = make_render_plan(source, device, policy);
 
         // A new device format means the old stream must play out first. Otherwise the same
@@ -512,8 +543,9 @@ void Player::run_queue(double start_seconds) {
             std::lock_guard lock(mutex_);
             waiting_position_ = start.value_or(0.0);
         }
-        add_segment(index, 0.0, source.seconds());
-        const PumpResult result = pump(*decoder, source, item.id, start);
+        apply_track_gain(item.gain);
+        add_segment(0.0, source.seconds());
+        const PumpResult result = pump(*decoder, source, item, start);
         if (result == PumpResult::Stop) return;
         if (result == PumpResult::Jump) {
             follow_jump();
