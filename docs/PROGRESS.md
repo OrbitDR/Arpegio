@@ -99,6 +99,12 @@ Segunda tanda el mismo día, con Windows al 100 %. Las 14 pruebas sonaron bien, 
 .\arpegio-cli.exe play $wav $jazz --output asio --device topping --last 8 --seconds 18
 ```
 
+### Comparación con Audirvana
+
+El 2026-11-01 el usuario notó por ASIO mejor separación de instrumentos en Audirvana, escuchando WAV 16/44.1. Medido con `asio_tap`: los dos programas envían al driver exactamente las mismas muestras, con la misma frecuencia, formato y buffer. Los datos y lo que la medida no cubre están en [DESIGN.md](DESIGN.md#comparación-con-audirvana-por-asio-2026-11-01). No se cambió el motor.
+
+Lo único que reabriría el asunto en PCM es una prueba a ciegas con el mismo volumen físico, con otra persona cambiando de programa. En 10 rondas, 9 aciertos o más tienen un 1 % de probabilidad de salir al azar. Entonces tocaría medir la salida analógica.
+
 ## Verificado
 
 Los detalles y cifras están en [DESIGN.md](DESIGN.md#verificación-hecha-el-2026-10-30).
@@ -108,6 +114,7 @@ Los detalles y cifras están en [DESIGN.md](DESIGN.md#verificación-hecha-el-202
 - Clics con eventos de ratón reales: cada botón de la barra inferior acepta el clic en todos sus puntos, también si una actualización de estado llega durante la pulsación o si su icono cambia entre presionar y soltar. Ver [Clics](DESIGN.md#verificación-de-los-clics-2026-11-01).
 - Liberar el dispositivo contra otro proceso real, en WASAPI exclusivo y en ASIO con DSD nativo.
 - `LOOPBACK` del MiniFuse: coincidencia total a 24 bits en 44.1, 96 y 192 kHz.
+- Música real por ASIO en el Topping con `arpegio.exe`: lo que recibe el driver coincide al 100 % con un WAV 16/44.1 y es idéntico a lo que envía Audirvana. Ver [Comparación con Audirvana](DESIGN.md#comparación-con-audirvana-por-asio-2026-11-01).
 - 11 FLAC reales coinciden con su MD5.
 - DST idéntico a `libdstdec` en 18 000 frames, en 2 y 6 canales.
 - Topping: WASAPI exclusivo, compartido y ASIO, PCM, DoP y DSD nativo hasta DSD256, sin eventos tardíos ni cortes.
@@ -123,7 +130,7 @@ Los detalles y cifras están en [DESIGN.md](DESIGN.md#verificación-hecha-el-202
 
 - **Interfaz con música real.** Todas las rutas se recorrieron con silencio digital y señal inaudible. Falta escuchar seek, siguiente, anterior, cambio de salida y liberar el dispositivo con música, por si hay clics.
 - Reordenar la cola arrastrando: probado con eventos simulados, no con el ratón.
-- Paso sin hueco: pasó de oído en SACD, CUE y archivos separados, sin comparar la salida real muestra a muestra.
+- Paso sin hueco: pasó de oído en SACD, CUE y archivos separados, sin comparar la salida real muestra a muestra. `asio_tap` ya permite hacerlo.
 - DoP por ASIO con el volumen de Windows bajo: ASIO no consulta ese volumen, y no se sabe si le afecta.
 - Aviso de volumen: la lógica está cubierta por pruebas, pero no se vio en pantalla con el Topping por debajo del 100 %. Se lee al listar dispositivos y al empezar a reproducir, no durante la reproducción.
 - Reapertura tras un reset de ASIO o una desconexión USB (`reopen_output_if_needed`).
@@ -241,7 +248,17 @@ Desde `build\release`, con `$py` apuntando a ese Python y `$t` a `..\..\tools\me
 
 # DST contra libdstdec: primero tools\measure\dst_compare.bat
 .\dst_compare.exe "disco.iso" 0 0
+
+# Lo que dos programas envían a un driver ASIO, contra el archivo. El DAC recibe silencio
+..\..\tools\measure\asio_tap.bat
+powershell ..\..\tools\measure\asio_tap.ps1 on
+.\arpegio-cli.exe play "pista.wav" --output asio --device topping --seconds 40
+# Aquí, reproducir la misma pista en el otro programa y cerrarlo
+powershell ..\..\tools\measure\asio_tap.ps1 off
+& $py $t\compare_tap.py "pista.wav" (Get-ChildItem ..\tap\captures\*.raw).FullName
 ```
+
+Cada programa deja en `build\tap\captures` un `.log` con las llamadas que hizo al driver. Las capturas ocupan unos 21 MB por minuto a 44.1 kHz.
 
 Biblioteca sobre la colección real, con la base de datos fuera del repositorio:
 
@@ -282,3 +299,5 @@ Señal inaudible para probar hardware: `arpegio-dsdgen` sin tonos, por ejemplo `
 - La colección real descubre lo que las pruebas sintéticas no: un `.flac` con ID3v2 delante cerraba el programa, y había híbridos `.iso.wv`, FLAC sin longitud en la cabecera y hojas con tiempos fuera de norma. Tras tocar decodificadores o escáner, repetir `scan` y `verify`.
 - Windows sella los archivos con un reloj de unos 15 ms. Una prueba que reescribe un archivo del mismo tamaño justo después de escanearlo debe mover la fecha a mano.
 - `third_party/` no se versiona. `scripts/fetch_deps.py` lo recrea con versiones y SHA-256 fijos.
+- Con `asio_tap.ps1 on`, ese driver queda en silencio para todos los programas hasta `off`. Antes de reproducir hay que comprobar que el programa cargó `asio_tap.dll`: si no, sonaría de verdad. `-Audible` deja pasar el sonido y sigue grabando.
+- Un programa empaquetado en MSIX, como Audirvana, ve sus escrituras en `AppData` redirigidas a su paquete. Por eso las capturas van junto a la DLL, en `build\tap`, y no en `%TEMP%`.

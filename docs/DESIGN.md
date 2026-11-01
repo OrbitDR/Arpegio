@@ -124,6 +124,29 @@ Página (ui/) <── JSON ──> MainWindow (WebView2) <──> Controller ─
 - **Nada se reconstruye bajo el puntero.** Chromium descarta el clic si el elemento que recibió la presión sale de la página antes de soltar. El estado llega cada 200 ms y un clic dura unos 100, así que reemplazar un icono en cada actualización perdía cerca de la mitad de los clics sobre él. Por eso `setIcon` solo toca la página si el icono cambia, los elementos se actualizan en su sitio y `button * { pointer-events: none }` hace que la presión caiga siempre en el botón, aunque su icono cambie de verdad entre presionar y soltar.
 - **Liberar el dispositivo es detenerse sin perder el sitio.** Una pausa mantiene el flujo abierto con silencio, así que la salida sigue ocupada. `devices.release` cierra el flujo y guarda la pista y la posición que se oyen, no las del cargador, que puede ir una pista por delante. Solo Reproducir vuelve a tomar la salida. `deviceHeld` es falso en WASAPI compartido, porque ese flujo no impide el paso a nadie y no hay nada que liberar.
 
+## Comparación con Audirvana por ASIO, 2026-11-01
+
+El usuario notó por ASIO mejor separación de instrumentos en Audirvana. Para saber si la diferencia estaba en los datos, `tools/measure/asio_tap.cpp` se coloca delante del driver del Topping y graba lo que cada programa escribe en los buffers. Ninguno de los dos se modifica, y cada uno usa su propia configuración.
+
+Con la misma pista real, un WAV 16/44.1, desde su primera muestra:
+
+| | `arpegio.exe` | Audirvana Studio 3.4 |
+|---|---|---|
+| Frecuencia, formato y buffer | 44100 Hz, Int32LSB, 256 | 44100 Hz, Int32LSB, 256 |
+| Frames con señal capturados | 2 040 831 | 2 088 959 |
+| Idénticos al archivo | 100 % | 100 % |
+| Diferencia máxima | 0 | 0 |
+
+Los 2 040 831 frames comunes son idénticos entre los dos programas. Ninguno aplica ganancia, dither ni remuestreo a esa pista, y el driver recibe los mismos bytes. Con esas pistas la diferencia que se oyó no está en las muestras, así que no se cambió el motor. `arpegio-cli` dio el mismo resultado.
+
+El comparador no es indulgente: sobre copias alteradas de una captura real detecta un solo sample cambiado en 1 unidad de 32 bits, −0.01 dB de ganancia, dither a 24 bits, canales cruzados y polaridad invertida.
+
+Lo que esto no cubre:
+
+- Otros formatos. Es una pista y unos 46 s, aunque las otras tres de esa sesión de escucha tienen el mismo formato. En MQA sí se espera una diferencia real, porque Audirvana lo decodifica y Arpegio no. DSD no se comparó.
+- Lo que ocurre después del driver. La salida analógica del DAC no se midió, y tampoco el ruido eléctrico que cada programa pueda inducir por USB.
+- Si la diferencia se oye a ciegas. Fue una comparación con el usuario sabiendo qué programa sonaba.
+
 ## Verificación de los clics, 2026-11-01
 
 Con eventos de ratón reales, en una rejilla de puntos de cada botón, manteniendo la presión hasta que llega una actualización de estado. Lo reproduce `tools\ui\steps_clicks.mjs`. `element.click()`, que usaban las pruebas anteriores, no pasa por la detección de lo que hay bajo el puntero, y por eso nunca lo vieron.
