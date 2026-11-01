@@ -20,12 +20,16 @@ FolderWatcher::FolderWatcher(const std::filesystem::path& folder, std::function<
     if (directory_ == INVALID_HANDLE_VALUE) throw std::runtime_error("cannot watch the folder");
     stop_ = CreateEventW(nullptr, TRUE, FALSE, nullptr);
     changed_ = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    started_ = CreateEventW(nullptr, TRUE, FALSE, nullptr);
     thread_ = std::thread([this] { run(); });
+    // Windows records changes only from the first read on, and a change it missed never comes back.
+    WaitForSingleObject(started_, INFINITE);
 }
 
 FolderWatcher::~FolderWatcher() {
     SetEvent(stop_);
     thread_.join();
+    CloseHandle(started_);
     CloseHandle(changed_);
     CloseHandle(stop_);
     CloseHandle(directory_);
@@ -41,10 +45,10 @@ void FolderWatcher::run() {
 
     for (;;) {
         ResetEvent(changed_);
-        if (!ReadDirectoryChangesW(directory_, buffer.data(), kBufferBytes, TRUE, kNotifyFilter, nullptr, &overlapped,
-                                   nullptr)) {
-            return;
-        }
+        const BOOL reading = ReadDirectoryChangesW(directory_, buffer.data(), kBufferBytes, TRUE, kNotifyFilter, nullptr,
+                                                   &overlapped, nullptr);
+        SetEvent(started_);
+        if (!reading) return;
 
         for (;;) {
             const DWORD wait = WaitForMultipleObjects(2, events, FALSE, pending ? quiet_ms_ : INFINITE);

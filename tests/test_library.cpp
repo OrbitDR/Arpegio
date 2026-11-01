@@ -1477,6 +1477,22 @@ TEST(watcher_reports_a_burst_once) {
     CHECK(calls == 1);
 }
 
+TEST(a_watcher_notices_a_change_made_right_after_it_starts) {
+    TempFolder folder;
+    const fs::path music = folder.music();
+    int missed = 0;
+    for (int i = 0; i < 100; ++i) {
+        std::atomic<bool> noticed{false};
+        {
+            FolderWatcher watcher(music, [&noticed] { noticed = true; }, 1);
+            write_text(music / (std::to_string(i) + ".txt"), "x");
+            for (int waited = 0; waited < 200 && !noticed; ++waited) Sleep(5);
+        }
+        if (!noticed) ++missed;
+    }
+    CHECK(missed == 0);
+}
+
 TEST(library_follows_a_watched_folder) {
     TempFolder folder;
     const fs::path music = folder.music();

@@ -111,7 +111,7 @@ Lo único que reabriría el asunto en PCM es una prueba a ciegas con el mismo vo
 
 Los detalles y cifras están en [DESIGN.md](DESIGN.md#verificación-hecha-el-2026-10-30).
 
-- 189 pruebas automáticas sin fallos. Diez fallos introducidos a propósito en el motor, cinco en la biblioteca, doce en la detección de MQA y las secciones y trece en los clics y en liberar el dispositivo fueron detectados.
+- 190 pruebas automáticas sin fallos. Diez fallos introducidos a propósito en el motor, cinco en la biblioteca, doce en la detección de MQA y las secciones y trece en los clics y en liberar el dispositivo fueron detectados.
 - Aplicación real con la colección real y silencio digital: `tools\ui\run.ps1` recorre la ventana sin errores de consola. Ver [Interfaz](DESIGN.md#verificación-de-la-interfaz-2026-10-31).
 - A 0 dB, lo que reciben los drivers ASIO reales del Topping y del SMSL coincide al 100 % con un WAV 16/44.1 y otro 24/96 después de añadir el volumen. A −6.0206 dB la ganancia es exacta y el residuo es el del dither. Ver [Cierre](DESIGN.md#verificación-del-cierre-2026-11-01).
 - SMSL: WASAPI exclusivo, compartido y ASIO, PCM, DoP y DSD nativo, también DSD512, sin eventos tardíos ni cortes, con silencio y señal inaudible.
@@ -163,15 +163,13 @@ Los detalles y cifras están en [DESIGN.md](DESIGN.md#verificación-hecha-el-202
 
 Una ejecución de `arpegio-library verify` sobre el catálogo multicanal se quedó parada, sin usar CPU, tras 33 s de CPU, y hubo que matarla. No se repitió en 17 ejecuciones posteriores, seis de ellas en las mismas condiciones, y las 5 184 pistas abren bien. No se encontró la causa, ni se sabe si fue en un decodificador o al cerrar el proceso. Si vuelve a ocurrir, capturar los hilos del proceso antes de matarlo.
 
-Tres comprobaciones fallan de vez en cuando, casi siempre con la CPU cargada. Medido el 2026-11-01 con 48 ejecuciones completas de las 130 pruebas y 39 de las 126 anteriores al arreglo de la cola:
+Tres comprobaciones fallaban de vez en cuando, casi siempre con la CPU cargada. Las 20 ejecuciones completas de las 189 pruebas hechas después de los arreglos, 8 en reposo y 12 con todos los núcleos ocupados, dieron 0 fallos. La tabla de antes y después:
 
-| Comprobación | Con el arreglo | Antes | Qué se sabe |
+| Comprobación | Antes | Después | Qué se sabe |
 |---|---|---|---|
-| `controller_shuffle_keeps_the_current_track_in_front`: `index == 0` | 2 de 48 | 4 de 39 | Carrera del motor, leída en el código y no confirmada con un experimento. `run_queue` copia el índice antes de abrir el decoder sin el candado y `add_segment` lo usa después, así que un `update_queue` en medio deja el segmento con el índice antiguo hasta que acaba la pista. `worker` tiene una ventana parecida al copiar `play_request_` sobre `loader_index_`. Hace falta editar la cola justo cuando empieza una pista |
-| `library_follows_a_watched_folder`: `wait_for_tracks(library, 2)` | 2 de 48 | 0 de 39 | No pasa por el motor. Sospecha sin confirmar: el constructor de `FolderWatcher` vuelve antes de que su hilo llame a `ReadDirectoryChangesW`, y lo que cambie en ese intervalo no se ve hasta el siguiente escaneo |
-| `seek_lands_on_the_right_sample`: `underruns == 0` | 1 de 48 | 0 de 39 | Sin investigar. Sus pistas tienen todas id 0, así que siguen el mismo camino que antes del arreglo. La salida simulada solo da unos milisegundos de margen tras un seek |
-
-Con tasas tan bajas, 39 ejecuciones no bastan para afirmar que las dos últimas no fallaran ya antes.
+| `library_follows_a_watched_folder`: `wait_for_tracks(library, 2)` | 2 de 48, y 1 de 120 de esa prueba sola con carga | 0 de 600 de esa prueba sola con carga | Resuelta y confirmada con un experimento. El constructor de `FolderWatcher` volvía antes de que su hilo llamara a `ReadDirectoryChangesW`: perdía 30 de cada 100 cambios hechos justo después, y ninguno tras el arreglo. Una vigilancia recién creada podía no enterarse de un cambio hasta el siguiente escaneo |
+| `controller_shuffle_keeps_the_current_track_in_front`: `index == 0` | 2 de 48 | 0 de 20 | Arreglada, pero leída en el código y sin experimento, y con esa tasa 20 ejecuciones son indicio y no prueba. `run_queue` copiaba el índice antes de abrir el decoder y `add_segment` lo usaba después, y `worker` podía pisar `loader_index_` con `play_request_`. Si vuelve a fallar, esta explicación no bastaba |
+| `seek_lands_on_the_right_sample`: `underruns == 0` | 1 de 48 | 0 de 20 | Sin investigar ni tocar. La salida simulada solo da unos milisegundos de margen tras un seek |
 
 ## Limitaciones actuales del motor
 

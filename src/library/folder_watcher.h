@@ -13,8 +13,8 @@ namespace arpegio {
 
 class FolderWatcher {
 public:
-    // Throws std::runtime_error when the folder cannot be watched. The callback runs on the watcher's
-    // thread, so it should only queue work.
+    // Throws std::runtime_error when the folder cannot be watched. Any change after it returns is seen. The
+    // callback runs on the watcher's thread, so it should only queue work.
     FolderWatcher(const std::filesystem::path& folder, std::function<void()> on_change, uint32_t quiet_ms);
     ~FolderWatcher();
     FolderWatcher(const FolderWatcher&) = delete;
@@ -28,6 +28,7 @@ private:
     HANDLE directory_ = INVALID_HANDLE_VALUE;
     HANDLE stop_ = nullptr;
     HANDLE changed_ = nullptr;
+    HANDLE started_ = nullptr;
     std::thread thread_;
 };
 
