@@ -731,7 +731,7 @@ TEST(albums_take_the_section_of_most_of_their_tracks) {
     for (const Album& album : store.albums()) sections[album.title] = album.section;
     CHECK(sections.size() == 13);
     CHECK(sections.at("cd") == AlbumSection::Cd);
-    CHECK(sections.at("16 at 48") == AlbumSection::Cd);
+    CHECK(sections.at("16 at 48") == AlbumSection::HighRes);
     CHECK(sections.at("24 at 44") == AlbumSection::HighRes);
     CHECK(sections.at("16 at 96") == AlbumSection::HighRes);
     CHECK(sections.at("24 at 96") == AlbumSection::HighRes);

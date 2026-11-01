@@ -42,7 +42,7 @@ export function qualityChip(item) {
   if (item.mqa) return 'MQA';
   if (item.dsd) return dsdName(item.rate);
   if (isLossy(item) || !item.rate) return '';
-  if (item.bits > 16 || item.rate > 48000) return `${item.bits}/${kilohertz(item.rate)}`;
+  if (item.bits > 16 || item.rate >= 48000) return `${item.bits}/${kilohertz(item.rate)}`;
   return '';
 }
 

@@ -20,8 +20,8 @@ const SORTS = {
 export const SECTIONS = [
   { key: 'mqa', label: 'MQA', hint: 'Álbumes con MQA, detectado en el propio audio' },
   { key: 'dsd', label: 'DSD', hint: 'DSF, DFF y SACD' },
-  { key: 'cd', label: 'CD', hint: 'PCM sin pérdida de 16 bits, hasta 48 kHz' },
-  { key: 'hires', label: 'PCM HighRes', hint: 'PCM sin pérdida de más de 16 bits o más de 48 kHz' },
+  { key: 'cd', label: 'CD', hint: 'PCM sin pérdida de 16 bits, por debajo de 48 kHz' },
+  { key: 'hires', label: 'PCM HighRes', hint: 'PCM sin pérdida de más de 16 bits, o de 48 kHz o más' },
   { key: 'lossy', label: 'Lossy', hint: 'MP3, AAC y otros formatos con pérdida' },
 ];
 

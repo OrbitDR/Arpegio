@@ -171,7 +171,7 @@ constexpr const char* kAlbumQuery = R"SQL(
            (SELECT CASE WHEN t.codec IN ('MP3', 'AAC', 'Vorbis', 'WMA') THEN 4
                         WHEN t.is_dsd THEN 1
                         WHEN t.is_mqa THEN 0
-                        WHEN t.bits > 16 OR t.rate > 48000 THEN 2
+                        WHEN t.bits > 16 OR t.rate >= 48000 THEN 2
                         ELSE 3 END AS section
             FROM tracks t WHERE t.album_id = al.album_id
             GROUP BY section ORDER BY COUNT(*) DESC, section LIMIT 1)

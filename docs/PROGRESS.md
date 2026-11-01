@@ -114,7 +114,7 @@ Los detalles y cifras están en [DESIGN.md](DESIGN.md#verificación-hecha-el-202
 - Biblioteca sobre la colección real: 5 184 pistas, 476 álbumes y 382 artistas. Las 5 184 pistas abren y se leen al principio, en medio y al final, también con las áreas multicanal de SACD. Reescanear sin cambios tarda 0.06 s y ningún archivo de la colección se modificó.
 - 954 pistas CUE empiezan en su muestra exacta en FLAC, WavPack, APE y DSF.
 - Detección de MQA sobre la colección real: los 1 022 archivos que marca el escáner son exactamente los que encuentra un análisis independiente de 30 s por pista, escrito aparte con libFLAC y sin usar el código de Arpegio. Ningún WAV, APE ni WavPack lo lleva. Esos 1 022 son 1 039 pistas contando las CUE, y en los 944 archivos que llevan etiqueta `ORIGINALSAMPLERATE` esa frecuencia coincide con la del audio.
-- Secciones sobre la colección real: los 476 álbumes están cada uno en una sola, con 80 en MQA, 31 en DSD, 304 en CD, 40 en PCM HighRes y 21 en Lossy. `tools\ui\steps_sections.mjs` las recorre en la ventana real, también con la ventana mínima y la cola abierta, sin errores de consola.
+- Secciones sobre la colección real: los 476 álbumes están cada uno en una sola, con 80 en MQA, 31 en DSD, 303 en CD, 42 en PCM HighRes y 20 en Lossy. `tools\ui\steps_sections.mjs` las recorre en la ventana real, también con la ventana mínima y la cola abierta, sin errores de consola.
 - Actualización de un catálogo real de la versión 1, sobre una copia: 4 748 pistas se releen en 25 s, y quedan iguales ids, favoritos, listas, cola y fechas de alta. El escaneo siguiente vuelve a tardar 0.05 s. Un escaneo completo desde cero tarda 43 s.
 
 ## Implementado pero sin verificar
@@ -256,7 +256,7 @@ Señal inaudible para probar hardware: `arpegio-dsdgen` sin tonos, por ejemplo `
 
 - Windows 11 x64, i5-12600K, 32 GB. VS Build Tools 2022 sin ATL, Windows SDK 10.0.26100, CMake 4.4, Ninja, Node 24, Rust 1.99, Python 3.14.
 - DAC Topping DX1 II y Arturia MiniFuse 2. Música en `D:\Música`.
-- Una compilación fallida deja el binario anterior, y las pruebas corren sobre él. Hay que mirar la salida de compilación antes de fiarse del resultado.
+- Una compilación fallida deja el binario anterior, y las pruebas corren sobre él. Hay que mirar la salida de compilación antes de fiarse del resultado. Pasa, por ejemplo, con `arpegio.exe` abierto, que da `LNK1168`.
 - `scripts\build.bat` imprime un aviso de `vswhere`. Es inofensivo.
 - Evitar parches largos de Python en línea desde Bash: se rompen. Es mejor escribir el script en un archivo.
 - La descarga del binario de FFmpeg fue bloqueada por el control de permisos. FFmpeg no hace falta y no se debe reintentar.
