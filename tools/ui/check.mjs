@@ -158,6 +158,8 @@ main()
     return 1;
   })
   .then(async (failures) => {
+    // Step files record a failed check in process.exitCode, which an explicit exit would overwrite.
+    failures ||= process.exitCode ?? 0;
     if (keepOpen) process.exit(failures ? 1 : 0);
 
     // Closes it as the user would, which also proves that it shuts down by itself.

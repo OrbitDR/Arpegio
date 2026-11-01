@@ -33,5 +33,7 @@ node tools\ui\check.mjs --data "$Data\outputs" --out $shots --steps tools\ui\ste
 if ($LASTEXITCODE) { exit 1 }
 node tools\ui\check.mjs --data "$Data\outputs" --out $shots --steps tools\ui\steps_interaction.mjs
 if ($LASTEXITCODE) { exit 1 }
+node tools\ui\check.mjs --data "$Data\outputs" --out $shots --steps tools\ui\steps_clicks.mjs
+if ($LASTEXITCODE) { exit 1 }
 node tools\ui\check.mjs --data "$Data\outputs" --out $shots --steps tools\ui\steps_cpu.mjs
 exit $LASTEXITCODE
