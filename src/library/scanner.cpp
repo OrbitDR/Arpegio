@@ -19,6 +19,7 @@
 #include "decode/sacd_iso.h"
 #include "library/cue_sheet.h"
 #include "library/metadata.h"
+#include "library/mqa.h"
 #include "library/paths.h"
 
 namespace arpegio {
@@ -49,6 +50,7 @@ struct FoundFile {
 
 struct FileRead {
     SourceFormat format;
+    bool mqa = false;
     Metadata metadata;
     std::optional<ArtworkFile> artwork;
 };
@@ -218,7 +220,9 @@ private:
     std::optional<FileRead> read_file(const FoundFile& file) {
         FileRead read;
         try {
-            read.format = open_decoder(file.path)->format();
+            const std::unique_ptr<Decoder> decoder = open_decoder(file.path);
+            read.format = decoder->format();
+            read.mqa = has_mqa_sync(*decoder);
         } catch (const std::exception& error) {
             warn(file.path, error.what());
             return std::nullopt;
@@ -253,6 +257,7 @@ private:
         track.relative_path = relative(file.path);
         track.stamp = file.stamp;
         track.format = read.format;
+        track.mqa = read.mqa;
         const std::filesystem::path folder = album_folder(file.path);
         track.album_folder = relative(folder);
         track.title = metadata.title.empty() ? path_to_utf8(file.path.stem()) : metadata.title;

@@ -448,7 +448,10 @@ TEST(controller_describes_albums_with_their_best_format) {
     CHECK(albums[0]["bits"] == 16);
     CHECK(albums[0]["dsd"] == false);
     CHECK(albums[0]["codec"] == "WAV");
+    CHECK(albums[0]["section"] == "cd");
+    CHECK(albums[0]["mqa"] == false);
     CHECK(albums[0]["added"].get<double>() > 0.0);
+    CHECK(h.call("library.albumTracks", {{"id", albums[0]["id"]}})[0]["mqa"] == false);
 }
 
 TEST(controller_reports_bad_requests_as_errors) {

@@ -146,6 +146,7 @@ add_library(arpegio_core STATIC
     src/library/library_store.cpp
     src/library/cue_sheet.cpp
     src/library/metadata.cpp
+    src/library/mqa.cpp
     src/library/artwork.cpp
     src/library/scanner.cpp
     src/library/track_source.cpp

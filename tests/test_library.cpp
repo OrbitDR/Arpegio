@@ -26,6 +26,7 @@
 #include "library/library.h"
 #include "library/library_store.h"
 #include "library/metadata.h"
+#include "library/mqa.h"
 #include "library/paths.h"
 #include "library/scanner.h"
 #include "library/track_source.h"
@@ -60,39 +61,62 @@ private:
 
 constexpr uint32_t kRate = 44100;
 constexpr int kBytesPerFrame = 4;
+constexpr uint64_t kMqaSync = 0xBE0498C88;
+constexpr uint32_t kMqaSyncBits = 36;
 
-// 16-bit stereo. The left channel counts up from `first`, so any lost or moved sample is visible.
-void write_wav(const fs::path& path, uint32_t frames, int first = 0) {
-    const uint32_t data_size = frames * kBytesPerFrame;
+void put_bytes(std::ofstream& out, const void* data, size_t size) {
+    out.write(static_cast<const char*>(data), static_cast<std::streamsize>(size));
+}
+
+void put_wav_header(std::ofstream& out, uint16_t bits, uint32_t frames) {
+    const uint16_t block = bits / 8 * 2;
+    const uint32_t data_size = frames * block;
     const uint32_t riff_size = 36 + data_size;
     const uint16_t pcm = 1;
     const uint16_t channels = 2;
-    const uint32_t byte_rate = kRate * kBytesPerFrame;
-    const uint16_t block = kBytesPerFrame;
-    const uint16_t bits = 16;
+    const uint32_t byte_rate = kRate * block;
     const uint32_t format_size = 16;
 
+    put_bytes(out, "RIFF", 4);
+    put_bytes(out, &riff_size, 4);
+    put_bytes(out, "WAVEfmt ", 8);
+    put_bytes(out, &format_size, 4);
+    put_bytes(out, &pcm, 2);
+    put_bytes(out, &channels, 2);
+    put_bytes(out, &kRate, 4);
+    put_bytes(out, &byte_rate, 4);
+    put_bytes(out, &block, 2);
+    put_bytes(out, &bits, 2);
+    put_bytes(out, "data", 4);
+    put_bytes(out, &data_size, 4);
+}
+
+// 16-bit stereo. The left channel counts up from `first`, so any lost or moved sample is visible.
+void write_wav(const fs::path& path, uint32_t frames, int first = 0) {
     std::ofstream out(path, std::ios::binary);
-    const auto put = [&out](const void* data, size_t size) {
-        out.write(static_cast<const char*>(data), static_cast<std::streamsize>(size));
-    };
-    put("RIFF", 4);
-    put(&riff_size, 4);
-    put("WAVEfmt ", 8);
-    put(&format_size, 4);
-    put(&pcm, 2);
-    put(&channels, 2);
-    put(&kRate, 4);
-    put(&byte_rate, 4);
-    put(&block, 2);
-    put(&bits, 2);
-    put("data", 4);
-    put(&data_size, 4);
+    put_wav_header(out, 16, frames);
     for (uint32_t i = 0; i < frames; ++i) {
         const int16_t left = static_cast<int16_t>((first + static_cast<int>(i)) % 32000);
         const int16_t right = static_cast<int16_t>(-left);
-        put(&left, 2);
-        put(&right, 2);
+        put_bytes(out, &left, 2);
+        put_bytes(out, &right, 2);
+    }
+}
+
+// One second of stereo whose channels differ by `word`, `repeats` times over. A `lift` of 0 puts it at
+// the 16th bit from the top, where MQA starts.
+void write_sync_wav(const fs::path& path, uint16_t bits, int repeats, uint64_t word = kMqaSync, int lift = 0) {
+    constexpr uint32_t kSpacing = 5000;
+    std::ofstream out(path, std::ios::binary);
+    put_wav_header(out, bits, kRate);
+    for (uint32_t i = 0; i < kRate; ++i) {
+        const uint32_t step = i % kSpacing;
+        const bool inside = static_cast<int>(i / kSpacing) < repeats && step < kMqaSyncBits;
+        const uint32_t flip = inside ? static_cast<uint32_t>((word >> (kMqaSyncBits - 1 - step)) & 1) : 0;
+        const uint32_t left = (i & 0x7F) << (bits - 8);
+        const uint32_t right = left ^ (flip << (bits - 16 + lift));
+        put_bytes(out, &left, bits / 8);
+        put_bytes(out, &right, bits / 8);
     }
 }
 
@@ -584,16 +608,153 @@ TEST(artwork_cache_rejects_what_is_not_an_image) {
     CHECK(!cache.store({0xFF, 0xD8, 0xFF, 0x00}).has_value());  // says JPEG, is not
 }
 
+TEST(mqa_is_found_at_the_bits_it_uses) {
+    TempFolder folder;
+    const fs::path path = folder.music() / "sync.wav";
+    for (const uint16_t bits : {uint16_t{16}, uint16_t{24}}) {
+        for (const int lift : {0, 1, 2}) {
+            write_sync_wav(path, bits, 3, kMqaSync, lift);
+            CHECK(has_mqa_sync(*open_decoder(path)));
+        }
+    }
+}
+
+TEST(mqa_takes_more_than_a_lucky_match) {
+    TempFolder folder;
+    const fs::path path = folder.music() / "sync.wav";
+    write_sync_wav(path, 16, 1);
+    CHECK(!has_mqa_sync(*open_decoder(path)));
+    write_sync_wav(path, 24, 3, kMqaSync ^ 1);
+    CHECK(!has_mqa_sync(*open_decoder(path)));
+    write_sync_wav(path, 16, 3, kMqaSync, 3);
+    CHECK(!has_mqa_sync(*open_decoder(path)));
+    write_wav(path, kRate);
+    CHECK(!has_mqa_sync(*open_decoder(path)));
+}
+
+TEST(scan_marks_mqa_files_and_their_cue_tracks) {
+    TempFolder folder;
+    const fs::path music = folder.music();
+    write_sync_wav(music / "sync.wav", 16, 3);
+    write_sync_wav(music / "whole.wav", 24, 3);
+    write_wav(music / "plain.wav", kRate);
+    write_text(music / "sync.cue",
+               "FILE \"sync.wav\" WAVE\n  TRACK 01 AUDIO\n    INDEX 01 00:00:00\n"
+               "  TRACK 02 AUDIO\n    INDEX 01 00:00:30\n");
+
+    LibraryStore store(folder.database());
+    ArtworkCache artwork(folder.cache());
+    scan_folder(store, artwork, music);
+    const std::vector<Track> tracks = store.tracks();
+    CHECK(tracks.size() == 4);
+    for (const Track& track : tracks) CHECK(track.mqa == (track.relative_path != "plain.wav"));
+}
+
+TEST(older_catalogues_read_their_lossless_files_again) {
+    TempFolder folder;
+    const fs::path music = folder.music();
+    write_sync_wav(music / "sync.wav", 16, 3);
+
+    ArtworkCache artwork(folder.cache());
+    TrackId id = 0;
+    FolderId root = 0;
+    {
+        LibraryStore store(folder.database());
+        scan_folder(store, artwork, music);
+        id = store.tracks().at(0).id;
+        root = store.folders().at(0).id;
+
+        Track mp3;
+        mp3.relative_path = "lossy.mp3";
+        mp3.codec = "MP3";
+        mp3.stamp = {5, 7};
+        mp3.format = {false, kRate, 2, 16, kRate};
+        store.upsert_track(root, mp3, 0, nullptr);
+
+        // Version 1 had no such column, and nothing in it says which files are MQA.
+        store.database().exec("ALTER TABLE tracks DROP COLUMN is_mqa");
+        store.database().set_user_version(1);
+    }
+
+    LibraryStore store(folder.database());
+    CHECK(store.schema_version() == 2);
+    CHECK(!store.track(id)->mqa);
+    const std::map<std::string, KnownFile> known = store.known_files(root);
+    CHECK(known.at("sync.wav").stamp.modified == 0);
+    CHECK(known.at("lossy.mp3").stamp.modified == 7);
+
+    const ScanResult result = scan_folder(store, artwork, music);
+    CHECK(result.unchanged == 0);
+    CHECK(result.tracks_written == 1);
+    CHECK(store.track(id)->mqa);
+    CHECK(scan_folder(store, artwork, music).unchanged == 1);
+}
+
+TEST(albums_take_the_section_of_most_of_their_tracks) {
+    TempFolder folder;
+    LibraryStore store(folder.database());
+    const FolderId root = store.add_folder(folder.music());
+
+    int next = 0;
+    const auto add = [&](const char* album, const char* codec, uint32_t rate, int bits, bool mqa = false, bool dsd = false) {
+        Track track;
+        track.relative_path = std::to_string(++next);
+        track.album = album;
+        track.artist = "Artist";
+        track.codec = codec;
+        track.format = {dsd, rate, 2, bits, rate};
+        track.mqa = mqa;
+        store.upsert_track(root, track, 0, nullptr);
+    };
+
+    add("cd", "FLAC", 44100, 16);
+    add("16 at 48", "WAV", 48000, 16);
+    add("24 at 44", "FLAC", 44100, 24);
+    add("16 at 96", "FLAC", 96000, 16);
+    add("24 at 96", "WavPack", 96000, 24);
+    add("mqa cd", "FLAC", 44100, 16, true);
+    add("mqa 24", "FLAC", 48000, 24, true);
+    add("dsd", "DSF", 5644800, 1, false, true);
+    add("mp3", "MP3", 44100, 16);
+    add("big aac", "AAC", 96000, 24);
+
+    add("mostly mqa", "FLAC", 44100, 16, true);
+    add("mostly mqa", "FLAC", 44100, 16, true);
+    add("mostly mqa", "FLAC", 44100, 16);
+    add("mostly cd", "FLAC", 44100, 16, true);
+    add("mostly cd", "FLAC", 44100, 16);
+    add("mostly cd", "FLAC", 44100, 16);
+    add("tied", "MP3", 44100, 16);
+    add("tied", "FLAC", 96000, 24);
+
+    std::map<std::string, AlbumSection> sections;
+    for (const Album& album : store.albums()) sections[album.title] = album.section;
+    CHECK(sections.size() == 13);
+    CHECK(sections.at("cd") == AlbumSection::Cd);
+    CHECK(sections.at("16 at 48") == AlbumSection::Cd);
+    CHECK(sections.at("24 at 44") == AlbumSection::HighRes);
+    CHECK(sections.at("16 at 96") == AlbumSection::HighRes);
+    CHECK(sections.at("24 at 96") == AlbumSection::HighRes);
+    CHECK(sections.at("mqa cd") == AlbumSection::Mqa);
+    CHECK(sections.at("mqa 24") == AlbumSection::Mqa);
+    CHECK(sections.at("dsd") == AlbumSection::Dsd);
+    CHECK(sections.at("mp3") == AlbumSection::Lossy);
+    CHECK(sections.at("big aac") == AlbumSection::Lossy);
+    CHECK(sections.at("mostly mqa") == AlbumSection::Mqa);
+    CHECK(sections.at("mostly cd") == AlbumSection::Cd);
+    CHECK(sections.at("tied") == AlbumSection::HighRes);
+}
+
 TEST(store_keeps_its_schema_across_opens) {
     TempFolder folder;
     {
         LibraryStore store(folder.database());
-        CHECK(store.schema_version() == 1);
+        CHECK(store.schema_version() == 2);
         store.add_folder(folder.music());
     }
     {
         LibraryStore store(folder.database());
-        CHECK(store.schema_version() == 1);
+        CHECK(store.schema_version() == 2);
         CHECK(store.folders().size() == 1);
         CHECK(store.add_folder(folder.music()) == store.folders()[0].id);
         store.database().set_user_version(99);

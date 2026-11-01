@@ -80,6 +80,7 @@ int stats(LibraryStore& store) {
     int cue = 0;
     int sacd = 0;
     int dsd = 0;
+    int mqa = 0;
     int no_album_artwork = 0;
     for (const Track& track : tracks) {
         ++codecs[track.codec];
@@ -88,18 +89,22 @@ int stats(LibraryStore& store) {
         cue += track.range_end != 0;
         sacd += track.sacd_area >= 0;
         dsd += track.format.dsd;
+        mqa += track.mqa;
     }
     const std::vector<Album> albums = store.albums();
     int single_track_albums = 0;
+    std::map<std::string, int> sections;
     for (const Album& album : albums) {
         no_album_artwork += album.artwork_id == 0;
         single_track_albums += album.track_count == 1;
+        ++sections[section_name(album.section)];
     }
     printf("schema %d\n%zu tracks, %zu albums, %zu artists, %.1f hours\n", store.schema_version(), tracks.size(),
            albums.size(), store.artists().size(), seconds / 3600.0);
-    printf("%d DSD, %d from CUE sheets, %d from SACD images, %d with artwork\n", dsd, cue, sacd, with_artwork);
+    printf("%d DSD, %d MQA, %d from CUE sheets, %d from SACD images, %d with artwork\n", dsd, mqa, cue, sacd, with_artwork);
     printf("%d albums without artwork, %d albums with a single track\n", no_album_artwork, single_track_albums);
     for (const auto& [codec, count] : codecs) printf("%6d  %s\n", count, codec.c_str());
+    for (const auto& [section, count] : sections) printf("%6d  albums in %s\n", count, section.c_str());
     return 0;
 }
 
@@ -232,8 +237,8 @@ int wmain(int argc, wchar_t** argv) {
         if (command == L"verify") return verify(store, argc >= 4 && std::wstring(argv[3]) == L"--verbose");
         if (command == L"albums") {
             for (const Album& album : store.albums()) {
-                printf("%5lld  %4d  %3d tracks  %s - %s\n", static_cast<long long>(album.id), album.year, album.track_count,
-                       album.album_artist.c_str(), album.title.c_str());
+                printf("%5lld  %4d  %3d tracks  %-5s  %s - %s\n", static_cast<long long>(album.id), album.year,
+                       album.track_count, section_name(album.section), album.album_artist.c_str(), album.title.c_str());
             }
             return 0;
         }

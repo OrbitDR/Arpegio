@@ -140,6 +140,12 @@ CREATE TRIGGER tracks_fts_delete AFTER DELETE ON tracks BEGIN
     DELETE FROM tracks_fts WHERE rowid = old.track_id;
 END;
 )SQL",
+    R"SQL(
+ALTER TABLE tracks ADD COLUMN is_mqa INTEGER NOT NULL DEFAULT 0;
+
+-- Only the audio tells, so the next scan reads again every lossless PCM file already catalogued.
+UPDATE tracks SET modified = 0 WHERE is_dsd = 0 AND codec NOT IN ('MP3', 'AAC', 'Vorbis', 'WMA');
+)SQL",
 };
 
 constexpr const char* kTrackQuery = R"SQL(
@@ -150,7 +156,7 @@ constexpr const char* kTrackQuery = R"SQL(
            t.range_start, t.range_end, t.sacd_area, t.sacd_track,
            COALESCE(t.artwork_id, 0), COALESCE(al.artwork_id, 0),
            EXISTS (SELECT 1 FROM favorites v WHERE v.track_id = t.track_id),
-           t.album_id, t.artist_id
+           t.album_id, t.artist_id, t.is_mqa
     FROM tracks t
     JOIN folders f ON f.folder_id = t.folder_id
     JOIN artists ar ON ar.artist_id = t.artist_id
@@ -158,9 +164,17 @@ constexpr const char* kTrackQuery = R"SQL(
     JOIN artists aa ON aa.artist_id = al.album_artist_id
 )SQL";
 
+// The numbers in the section's CASE are the values of AlbumSection.
 constexpr const char* kAlbumQuery = R"SQL(
     SELECT al.album_id, al.title, aa.name, al.year, COALESCE(al.artwork_id, 0),
-           s.tracks, s.seconds, s.added, b.codec, b.rate, b.bits, b.is_dsd
+           s.tracks, s.seconds, s.added, b.codec, b.rate, b.bits, b.is_dsd,
+           (SELECT CASE WHEN t.codec IN ('MP3', 'AAC', 'Vorbis', 'WMA') THEN 4
+                        WHEN t.is_dsd THEN 1
+                        WHEN t.is_mqa THEN 0
+                        WHEN t.bits > 16 OR t.rate > 48000 THEN 2
+                        ELSE 3 END AS section
+            FROM tracks t WHERE t.album_id = al.album_id
+            GROUP BY section ORDER BY COUNT(*) DESC, section LIMIT 1)
     FROM albums al
     JOIN artists aa ON aa.artist_id = al.album_artist_id
     JOIN (SELECT album_id, COUNT(*) AS tracks, MAX(added_at) AS added,
@@ -217,6 +231,17 @@ void migrate(Database& database) {
 }
 
 }  // namespace
+
+const char* section_name(AlbumSection section) {
+    switch (section) {
+    case AlbumSection::Mqa: return "mqa";
+    case AlbumSection::Dsd: return "dsd";
+    case AlbumSection::HighRes: return "hires";
+    case AlbumSection::Cd: return "cd";
+    case AlbumSection::Lossy: return "lossy";
+    }
+    return "?";
+}
 
 LibraryStore::LibraryStore(const std::filesystem::path& database) : database_(database) {
     database_.exec("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON;");
@@ -327,9 +352,9 @@ TrackId LibraryStore::upsert_track(FolderId folder, const Track& track, CueId cu
             .query(R"SQL(
         INSERT INTO tracks(folder_id, relative_path, part, file_size, modified, title, artist_id, album_artist_id, album_id,
                            composer, genre, comment, codec, track_no, disc_no, year, is_dsd, rate, channels, bits, length,
-                           bitrate, pre_emphasis, cue_id, range_start, range_end, sacd_area, sacd_track, artwork_id,
+                           bitrate, pre_emphasis, is_mqa, cue_id, range_start, range_end, sacd_area, sacd_track, artwork_id,
                            added_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(folder_id, relative_path, part) DO UPDATE SET
             file_size = excluded.file_size, modified = excluded.modified, title = excluded.title,
             artist_id = excluded.artist_id, album_artist_id = excluded.album_artist_id, album_id = excluded.album_id,
@@ -337,15 +362,16 @@ TrackId LibraryStore::upsert_track(FolderId folder, const Track& track, CueId cu
             genre = excluded.genre, comment = excluded.comment, codec = excluded.codec, track_no = excluded.track_no,
             disc_no = excluded.disc_no, year = excluded.year, is_dsd = excluded.is_dsd, rate = excluded.rate,
             channels = excluded.channels, bits = excluded.bits, length = excluded.length, bitrate = excluded.bitrate,
-            pre_emphasis = excluded.pre_emphasis, cue_id = excluded.cue_id, range_start = excluded.range_start,
+            pre_emphasis = excluded.pre_emphasis, is_mqa = excluded.is_mqa, cue_id = excluded.cue_id,
+            range_start = excluded.range_start,
             range_end = excluded.range_end, sacd_area = excluded.sacd_area, sacd_track = excluded.sacd_track,
             artwork_id = excluded.artwork_id
         RETURNING track_id)SQL",
                    folder, track.relative_path, track.part, track.stamp.size, track.stamp.modified, title, artist_id,
                    album_artist_id, album_id, track.composer, track.genre, track.comment, track.codec, track.track_number,
                    track.disc_number, track.year, track.format.dsd, track.format.rate, track.format.channels,
-                   track.format.bits, track.format.length, track.bitrate, track.pre_emphasis, cue_id, track.range_start,
-                   track.range_end, track.sacd_area, track.sacd_track, artwork_id, now_seconds())
+                   track.format.bits, track.format.length, track.bitrate, track.pre_emphasis, track.mqa, cue_id,
+                   track.range_start, track.range_end, track.sacd_area, track.sacd_track, artwork_id, now_seconds())
             .single();
 
     database_.query("DELETE FROM tracks_fts WHERE rowid = ?", id).run();
@@ -460,6 +486,7 @@ std::vector<Track> LibraryStore::read_tracks(Statement& statement) {
         track.favorite = statement.integer(31) != 0;
         track.album_id = statement.integer(32);
         track.artist_id = statement.integer(33);
+        track.mqa = statement.integer(34) != 0;
         out.push_back(std::move(track));
     }
     return out;
@@ -481,6 +508,7 @@ std::vector<Album> LibraryStore::read_albums(Statement& statement) {
         album.rate = static_cast<uint32_t>(statement.integer(9));
         album.bits = static_cast<int>(statement.integer(10));
         album.dsd = statement.integer(11) != 0;
+        album.section = static_cast<AlbumSection>(statement.integer(12));
         out.push_back(std::move(album));
     }
     return out;

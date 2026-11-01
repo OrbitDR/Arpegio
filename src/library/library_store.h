@@ -29,6 +29,11 @@ using CueId = int64_t;
 
 constexpr const char* kVariousArtists = "Various Artists";
 
+// The kind of file an album is, for browsing. The order settles a tie between two kinds of tracks.
+enum class AlbumSection { Mqa, Dsd, HighRes, Cd, Lossy };
+
+const char* section_name(AlbumSection section);
+
 struct FileStamp {
     uint64_t size = 0;
     int64_t modified = 0;  // file time ticks, compared for equality only
@@ -62,6 +67,7 @@ struct Track {
     SourceFormat format;  // `length` covers this track, not the whole file
     int bitrate = 0;      // kbit/s
     bool pre_emphasis = false;
+    bool mqa = false;
 
     uint64_t range_start = 0;  // in `format` units; a range_end of 0 means the whole file
     uint64_t range_end = 0;
@@ -85,6 +91,7 @@ struct Album {
     uint32_t rate = 0;
     int bits = 0;
     bool dsd = false;
+    AlbumSection section = AlbumSection::Cd;  // the one most of its tracks fall in
     double added_at = 0.0;  // seconds since 1970, of its newest track
 };
 

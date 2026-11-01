@@ -95,6 +95,7 @@ json track_json(const Track& track) {
             {"bits", track.format.bits},
             {"channels", track.format.channels},
             {"dsd", track.format.dsd},
+            {"mqa", track.mqa},
             {"bitrate", track.bitrate},
             {"art", track_artwork(track)},
             {"favorite", track.favorite},
@@ -121,6 +122,8 @@ json album_json(const Album& album) {
             {"rate", album.rate},
             {"bits", album.bits},
             {"dsd", album.dsd},
+            {"mqa", album.section == AlbumSection::Mqa},
+            {"section", section_name(album.section)},
             {"added", album.added_at}};
 }
 
