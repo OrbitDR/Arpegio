@@ -611,7 +611,7 @@ a.album-artist:hover { color: var(--accent); }
 .setting:last-child { border-bottom: 0; }
 .setting-text { min-width: 0; flex: 1; }
 .setting-text p { color: var(--muted); font-size: 13px; margin-top: 2px; }
-.setting.check { cursor: pointer; }
+.setting.check, .dop-check { cursor: pointer; }
 .setting input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--accent); flex: none; }
 .setting-range { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; width: 170px; flex: none; }
 .setting-range .slider { width: 100%; flex: none; }

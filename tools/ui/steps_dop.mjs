@@ -30,7 +30,7 @@ export default async function run(page, { sleep }) {
   await page.wait(`import('/js/store.js').then((s) => s.state.devices.known)`, 30000);
   const list = (await devices()).list;
   const outputs = ['asio', 'exclusive'].map((kind) => list.find((item) => item.kind === kind && !item.error && name.test(item.name))).filter(Boolean);
-  check(outputs.length > 0, `there is an output to try (${outputs.map((item) => item.kind)})`);
+  check(outputs.length === 2, `there are both outputs to try (${outputs.map((item) => item.kind)})`);
 
   for (const output of outputs) {
     await page.call('devices.select', { key: output.key });

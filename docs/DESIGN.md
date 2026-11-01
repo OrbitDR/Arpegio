@@ -15,7 +15,7 @@ Decoder ──> Pipeline ──> RingBuffer ──> FrameSource::pull ──> Ou
 ```
 
 - **Un proceso de 64 bits.** Los dos drivers ASIO del equipo tienen versión de 64 bits, así que no hace falta el host separado del plan de foobar2000.
-- **El anillo guarda bytes finales del dispositivo.** Toda conversión ocurre antes, en el hilo de carga. El callback no decodifica, no reserva memoria y no toma bloqueos.
+- **El anillo guarda bytes finales del dispositivo.** Toda conversión ocurre antes, en el hilo de carga, salvo el volumen por software, que tiene que oírse al momento: ver [Volumen](#volumen-y-replaygain). El callback no decodifica, no reserva memoria y no toma bloqueos.
 - **Doubles como formato intermedio de PCM.** Un double representa exacto cualquier entero de 32 bits, así que la ruta sin procesado conserva cada muestra. Lo comprueban `tests/test_quantizer.cpp` y `tools/measure/verify_flac.py`.
 - **Sesión por formato.** Si dos pistas producen el mismo `RenderPlan`, siguen en el mismo anillo sin hueco. Si cambia el formato de dispositivo, el anillo se drena y el dispositivo se reabre.
 - **Marcadores DoP en tiempo real.** Los pone `FrameSource::pull`, no el cargador, para que la secuencia 05/FA siga continua tras un seek o durante el silencio.
@@ -25,15 +25,46 @@ Decoder ──> Pipeline ──> RingBuffer ──> FrameSource::pull ──> Ou
 
 - **ASIO:** interfaces oficiales del SDK de Steinberg (`asio.h`, `asiosys.h`, `iasiodrv.h`) con `IASIO*` directo. No se compilan `asio.cpp` ni `asiodrivers.cpp`: descargan el driver activo al consultar otro y truncan nombres ANSI. Todas las llamadas ocurren en un hilo STA propio, porque los drivers son `ThreadingModel=Apartment`.
 - **WASAPI exclusivo:** por eventos. Cada evento llena el búfer completo y `GetCurrentPadding` no se consulta, como pide Microsoft. Periodo por defecto de 40 ms.
-- **WASAPI compartido:** formato de mezcla de Windows. El remuestreo lo hace r8brain, no Windows.
+- **WASAPI compartido:** formato de mezcla de Windows. El remuestreo lo hace Arpegio, no Windows.
+
+## Volumen y ReplayGain
+
+- **El volumen va en el callback, sobre los bytes finales.** El anillo puede llevar 90 s de adelanto, y cualquier punto anterior se oiría un minuto y medio tarde. Es un bucle sin bloqueos ni reservas de memoria, que lee las muestras, las escala y las vuelve a escribir con el mismo cuantizador del resto del motor.
+- **A 0 dB no hay etapa.** `Volume::apply` vuelve sin leer nada, de modo que la ruta bit-perfect es literalmente la misma que antes de existir el volumen. También lo es desde la primera muestra tras una rampa que acaba en 0 dB.
+- **Rampa de 20 ms.** Un cambio no produce clic y es demasiado corta para oírse como fundido. Un flujo que abre con el volumen bajado empieza ya en ese nivel, sin rampa desde el máximo.
+- **Dither TPDF al escalar, a la misma resolución que el resto del motor:** 24 bits, o menos si el formato no llega. En pausa y con el volumen al mínimo la salida es cero exacto, sin el ruido del dither.
+- **Nunca sube.** 0 dB es el máximo, así que el volumen no puede recortar.
+- **Cada dispositivo guarda su nivel.** Un mismo número no significa lo mismo en un DAC de escritorio y en unos auriculares. Se guarda un segundo después de soltar el control, sin esperar a cerrar: tras un fallo, el programa no debe volver a nivel completo. Silenciar no se guarda, porque un programa que arranca mudo parece averiado.
+- **DSD que sigue siendo DSD no admite volumen.** Mientras suena DSD nativo o DoP el control está desactivado y el controlador rechaza el cambio. Si el volumen ya está por debajo de 0 dB, cualquier DSD se convierte a PCM, también con el modo forzado a nativo o DoP: de otro modo, una pista DSD tras un PCM a −30 dB entraría 30 dB más fuerte. Al volver a 0 dB, la pista siguiente recupera su ruta.
+- **ReplayGain va en el cargador,** porque es de cada pista y debe caer en el punto exacto del cambio. Se aplica delante de filtros y mezcla, para que la cola de una pista conserve su nivel. No forma parte del `RenderPlan`: dos pistas con ganancias distintas siguen en el mismo flujo, sin hueco.
+- **ReplayGain cambia el dither al vuelo.** Un plan bit-perfect no lleva dither, y una pista con ganancia sí. `Pipeline::set_track_gain` lo activa solo para esa pista, y la siguiente sin ganancia sale exacta.
+- **Bit-perfect se calcula a cada lectura,** con el volumen de ese momento y la ganancia de la pista que se oye, que no es la que se decodifica.
+- **Una pista sin etiquetas no cambia.** Modo álbum usa la etiqueta de pista si falta la de álbum. Una ganancia nunca lleva el pico por encima del máximo, y sin pico conocido solo puede bajar. Cambiar de modo rellena el anillo desde lo que se oye, con un hueco breve.
+- **De dónde salen los valores.** Etiquetas de cualquier formato, incluidos los átomos libres de MP4 que TagLib no expone, y líneas `REM` de CUE, que mandan sobre las etiquetas de un archivo con todo el disco. Un valor absurdo se descarta: una ganancia equivocada es peor que ninguna.
+
+## Remuestreo
+
+Solo actúa si el dispositivo no admite la frecuencia de la pista, o en WASAPI compartido. Las dos opciones están detrás de `Resampler`, con muestras `double`, en el hilo de carga. Ninguna añade retardo: la primera muestra de salida corresponde a la primera de entrada.
+
+| | r8brain | SoX (libsoxr 0.1.3) |
+|---|---|---|
+| Configuración | 218 dB, banda de transición 1 %, fase lineal | 32 bits, `SOXR_STEEP_FILTER`, fase lineal |
+| Residuo de un tono de 997 Hz | −221.5 dB | −211.5 dB |
+| Alias más fuerte | −221.4 dBFS | −221.4 dBFS |
+| Tono de 20 kHz | ±0.01 dB | ±0.01 dB |
+| Desplazamiento en el tiempo | Menos de 0.01 muestras | Menos de 0.01 muestras |
+
+Medido en `tests/test_resampler.cpp` con seis pares de frecuencias entre 44.1 y 352.8 kHz, sin dither ni cuantización. Las dos quedan muy por debajo de lo que un DAC de 24 bits puede reproducir, así que elegir una u otra no cambia lo que se oye. Se ofrecen las dos porque Audirvana también lo hace.
+
+De libsoxr solo se compila el motor de doble precisión, el que llega a 32 bits. El sistema de compilación del proyecto, de 2018, detecta SIMD por su cuenta y decide opciones que chocan con las del resto.
 
 ## DSD
 
 Orden automático:
 
 1. Nativo, solo por ASIO y si el driver lo declara con `kAsioCanDoIoFormat`.
-2. DoP, por ASIO o WASAPI exclusivo, si el usuario confirmó que su DAC lo entiende. Ni ASIO ni WASAPI permiten detectarlo. Por WASAPI exige además que el volumen de hardware esté en 0 dB.
-3. Conversión a PCM. WASAPI compartido siempre usa esta ruta.
+2. DoP, por ASIO o WASAPI exclusivo, si el usuario confirmó que su DAC lo entiende. Ni ASIO ni WASAPI permiten detectarlo: Ajustes tiene una prueba guiada que envía silencio DSD64 y pregunta qué indica la pantalla del DAC. Por WASAPI exige además que el volumen de hardware esté en 0 dB.
+3. Conversión a PCM. WASAPI compartido siempre usa esta ruta, y también cualquier DSD mientras el volumen por software esté por debajo de 0 dB.
 
 El volumen de hardware del endpoint llega a las muestras incluso en modo exclusivo. En el Topping DX1 II, a −4 dB el DAC deja de reconocer DoP y lo reproduce como PCM, con un ruido bajo. Por eso cualquier valor distinto de 0 dB también impide declarar bit-perfect una salida WASAPI. La escucha debe hacerse con Windows al 100 % y el volumen físico del DAC.
 
@@ -123,6 +154,21 @@ Página (ui/) <── JSON ──> MainWindow (WebView2) <──> Controller ─
 - **Las secciones son una ruta, no un estado.** Junto al buscador, cada botón abre `{ view: 'albums', section }`, y la propia vista filtra la lista de álbumes. Atrás, adelante y la posición de desplazamiento funcionan sin código propio. Si no caben, los botones bajan a una segunda línea en vez de ocultarse: con la ventana mínima y la cola abierta quedan unos 400 px.
 - **Nada se reconstruye bajo el puntero.** Chromium descarta el clic si el elemento que recibió la presión sale de la página antes de soltar. El estado llega cada 200 ms y un clic dura unos 100, así que reemplazar un icono en cada actualización perdía cerca de la mitad de los clics sobre él. Por eso `setIcon` solo toca la página si el icono cambia, los elementos se actualizan en su sitio y `button * { pointer-events: none }` hace que la presión caiga siempre en el botón, aunque su icono cambie de verdad entre presionar y soltar.
 - **Liberar el dispositivo es detenerse sin perder el sitio.** Una pausa mantiene el flujo abierto con silencio, así que la salida sigue ocupada. `devices.release` cierra el flujo y guarda la pista y la posición que se oyen, no las del cargador, que puede ir una pista por delante. Solo Reproducir vuelve a tomar la salida. `deviceHeld` es falso en WASAPI compartido, porque ese flujo no impide el paso a nadie y no hay nada que liberar.
+- **Controles de Windows.** `MediaControls` publica título, artista, álbum, portada y posición en `SystemMediaTransportControls`, la misma sesión que leen el panel de medios y la pantalla de bloqueo, y añade tres botones a la miniatura de la barra de tareas. Windows llama desde sus propios hilos, así que todo vuelve a la ventana como mensajes y acaba en las mismas peticiones que usa la página. Si Windows rechaza algo, el programa sigue sin ello.
+- **Las teclas multimedia ya no son globales.** Con `RegisterHotKey`, Arpegio se quedaba las teclas aunque otro programa estuviera sonando. Ahora las reparte Windows entre las sesiones, y van a la que suena. `WM_APPCOMMAND` cubre el caso de que no haya ninguna sesión.
+- **Una cola vacía cierra la sesión** con `IsEnabled(false)`, porque de otro modo Windows sigue mostrando la última pista. Parado con cola, en cambio, la sesión sigue abierta con la pista donde retomaría.
+- **Identidad en Windows.** `OrbitDR.Arpegio` es el AppUserModelID del proceso y del acceso directo del instalador. El nombre que Windows muestra sale de `FileDescription`, en los recursos del ejecutable. Si cambia el nombre del programa hay que cambiar los dos.
+- **La prueba de DoP corre en un `Player` aparte.** Así la cola, la posición y el estado de la música no se enteran. Lo que suena se libera antes, igual que con el enchufe, y cualquier música que empiece, también con una tecla multimedia, termina la prueba.
+
+## Instalador
+
+`scripts\package.bat` compila el preset `dist`, en Release: el preset `release` usa RelWithDebInfo, que en MSVC limita la expansión en línea a lo marcado `inline`. Pasa las pruebas, copia lo necesario con `cmake --install` y genera un instalador de Inno Setup.
+
+- **Para el usuario actual, sin administrador.** Nada de lo que hace el programa necesita permisos elevados. El diálogo de Inno permite instalar para todos.
+- **Sin dependencias que instalar.** El runtime de C++ va enlazado de forma estática y el cargador de WebView2 también. El ejecutable solo importa DLL de Windows. WebView2 Runtime viene con Windows 11: si falta, la última página del instalador ofrece la descarga.
+- **Desinstalar conserva `%LOCALAPPDATA%\Arpegio`.** Son el catálogo, los favoritos, las listas y los ajustes del usuario.
+- **Las licencias viajan con el binario,** en la carpeta `licenses`. El código fuente que pide la GPL está en el repositorio público.
+- **Sin firma.** No hay certificado, así que SmartScreen puede avisar la primera vez.
 
 ## Comparación con Audirvana por ASIO, 2026-11-01
 
@@ -152,6 +198,36 @@ Lo que esto no cubre:
 - Otros formatos. Es una pista y unos 46 s, aunque las otras tres de esa sesión de escucha tienen el mismo formato. En MQA sí se espera una diferencia real, porque Audirvana lo decodifica y Arpegio no. DSD no se comparó.
 - Lo que ocurre después del driver. La salida analógica del DAC no se midió, y tampoco el ruido eléctrico que cada programa pueda inducir por USB.
 - Si la diferencia se oye a ciegas. Fue una comparación con el usuario sabiendo qué programa sonaba.
+
+## Verificación del cierre, 2026-11-01
+
+Con `asio_tap` delante del driver real, el DAC en silencio y `arpegio-cli`, que usa el mismo motor que la aplicación. Dos WAV reales, 20 s de cada uno, en dos DAC con drivers ASIO distintos, los dos en Int32LSB:
+
+| Pista | Volumen | Topping DX1 II | SMSL (`USB DAC ASIO`) |
+|---|---|---|---|
+| 16 bits, 44.1 kHz | 0 dB | 870 232 frames, 100 % idénticos | 870 744 frames, 100 % idénticos |
+| 24 bits, 96 kHz | 0 dB | 1 907 712 frames, 100 % idénticos | 1 906 688 frames, 100 % idénticos |
+| 16 bits, 44.1 kHz | −6.0206 dB | Ganancia 0.499999996, residuo −146.25 dBFS | Igual |
+| 24 bits, 96 kHz | −6.0206 dB | Ganancia 0.499999997, residuo −146.26 dBFS | Igual |
+
+La diferencia máxima a 0 dB es 0. El residuo a −6 dB es el del dither TPDF a 24 bits, que en teoría da −146.25 dBFS: la atenuación no añade nada más.
+
+DSD512 nativo por ASIO en el SMSL, con señal inaudible generada: bit-perfect, 0 cortes y 0 eventos tardíos. La colección llega a DSD256, así que es la primera vez que esa ruta corre en un DAC real.
+
+**El driver retira su salida de Windows al dejar DSD nativo.** Al cerrar un flujo DSD nativo por ASIO, la salida WASAPI del mismo DAC desaparece unos 50 ms después y vuelve a los 0.8 s, también en compartido. Con PCM y con DoP no pasa. Se midió en el SMSL, y en el Topping se vio el mismo síntoma en la batería, sin llegar a medirlo. Cambiar de ASIO a WASAPI mientras sonaba DSD chocaba justo con ese hueco: `IMMDevice::Activate` devolvía `AUDCLNT_E_DEVICE_INVALIDATED` y la música se paraba. Ahora `WasapiOutput::open` espera hasta 3 s a que vuelva y la música sigue en el mismo punto, en poco más de un segundo.
+
+Los controles de Windows se comprobaron desde fuera de la aplicación, con `GlobalSystemMediaTransportControlsSessionManager`, la API que leen el panel de medios y la pantalla de bloqueo. `tools\ui\steps_media.mjs` lee título, artista, álbum, portada, estado y posición, y envía reproducir, pausa, siguiente, anterior y un salto a 20 s. Las teclas multimedia reales llegan por Windows sin `RegisterHotKey`. `ThumbBarAddButtons` devuelve `S_OK`, y los clics en esos botones se simularon con el mismo mensaje que envía Windows. Nadie ha mirado la pantalla de bloqueo ni la miniatura.
+
+Coste de toda la aplicación, WebView2 incluido, en dos mediciones en el SMSL con 24/96 sonando: entre 1.1 y 2.4 % de un núcleo a 0 dB, entre 0.6 y 1.1 % con el volumen a −12 dB, y menos de 0.3 % en reposo. La etapa de volumen no se aprecia: esas diferencias son ruido de medida.
+
+Dos fallos que las pruebas no encontraron, vistos al releer el código:
+
+- El plan de una pista se decidía cuando el cargador llegaba a ella, hasta 90 s antes de oírse. Bajar el volumen en ese intervalo dejaba un DSD planeado como nativo, que entraba a nivel completo. Ahora se recalcula justo antes de abrir el flujo, y `a_volume_lowered_while_the_next_track_waits_still_reaches_it` lo cubre.
+- El diálogo de la prueba de DoP reconstruía sus botones cada 400 ms, el mismo fallo que perdía clics en la barra. Ahora solo cambia si cambia el texto.
+
+`tools\ui\run.ps1` se pasó en los dos DAC. Con el SMSL salieron a la luz dos errores de la propia batería: el paso de CPU buscaba el proceso solo en `build\release`, así que con otro preset medía un 0 % falso y lo daba por bueno, y la prueba de DoP se saltaba WASAPI exclusivo sin fallar. Los dos pasos ya fallan si no encuentran lo que deben medir.
+
+Instalador, en este equipo: instalación silenciosa, ejecutable con la versión y el nombre correctos, solo DLL de Windows entre sus dependencias, la copia instalada se registra como sesión multimedia `OrbitDR.Arpegio`, y la desinstalación deja la carpeta, el acceso directo y el registro limpios, con los datos intactos.
 
 ## Verificación de los clics, 2026-11-01
 

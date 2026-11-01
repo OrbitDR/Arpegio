@@ -155,7 +155,10 @@ export default async function run(page, { sleep }) {
       await until(`status.plan && status.plan.path === 'dsdToPcm' && status.position > 0.3`, 20000);
       check(true, 'with the volume down, DSD is converted and does not come in at full level');
       await page.call('player.setVolume', { db: 0 });
-      await page.call('player.jump', { index: 3 });
+      await sleep(500);
+      check((await status()).plan.path === 'dsdToPcm', 'raising it leaves the track that is sounding as it is');
+      await page.call('devices.release');
+      await page.call('player.toggle');
       await until(`status.plan && status.plan.path === 'dsdNative' && status.position > 0.3`, 20000);
       check(true, 'at 0 dB the next start is native again');
       check((await status()).underruns === 0, 'without a single underrun');

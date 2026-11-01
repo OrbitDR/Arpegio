@@ -43,6 +43,11 @@ constexpr REFERENCE_TIME kHnsPerMs = 10000;
 constexpr uint32_t kDefaultPeriodMs = 40;
 constexpr REFERENCE_TIME kSharedBuffer = 200 * kHnsPerMs;
 constexpr DWORD kStallTimeoutMs = 2000;
+constexpr DWORD kEndpointWaitMs = 3000;
+constexpr DWORD kEndpointPollMs = 50;
+
+// The endpoint is not there right now, which may last a moment or mean that the device was unplugged.
+struct EndpointGone {};
 
 struct Candidate {
     WireEncoding encoding;
@@ -150,25 +155,26 @@ public:
     DeviceFormat open(const DeviceFormat& requested, FrameSource& source) override {
         close();
         source_ = &source;
-        format_ = requested;
         faulted_.store(false, std::memory_order_release);
         {
             std::lock_guard lock(fault_mutex_);
             fault_.clear();
         }
-        device_ = find_device(device_info_.id);
-        if (exclusive_) initialize_exclusive();
-        else initialize_shared();
 
-        HRESULT result = client_->SetEventHandle(buffer_event_);
-        if (FAILED(result)) throw std::runtime_error("SetEventHandle failed: " + hresult_text(result));
-        result = client_->GetBufferSize(&buffer_frames_);
-        if (FAILED(result)) throw std::runtime_error("GetBufferSize failed: " + hresult_text(result));
-        result = client_->GetService(IID_PPV_ARGS(&render_));
-        if (FAILED(result)) throw std::runtime_error("GetService failed: " + hresult_text(result));
-
-        period_us_ = static_cast<uint64_t>(buffer_frames_) * 1000000 / format_.rate;
-        return format_;
+        // Leaving native DSD, a driver can take its Windows endpoint away for about a second, starting just
+        // after the ASIO stream closes. That is exactly when a change of output on the same DAC gets here.
+        const ULONGLONG give_up = GetTickCount64() + kEndpointWaitMs;
+        for (;;) {
+            try {
+                format_ = requested;
+                open_stream();
+                return format_;
+            } catch (const EndpointGone&) {
+                close();
+                if (GetTickCount64() >= give_up) throw std::runtime_error("audio device not found: the endpoint is gone");
+                Sleep(kEndpointPollMs);
+            }
+        }
     }
 
     void start() override {
@@ -223,10 +229,25 @@ public:
     }
 
 private:
+    static void check(HRESULT result, const char* call) {
+        if (result == AUDCLNT_E_DEVICE_INVALIDATED) throw EndpointGone{};
+        if (FAILED(result)) throw std::runtime_error(std::string(call) + " failed: " + hresult_text(result));
+    }
+
+    void open_stream() {
+        device_ = find_device(device_info_.id);
+        if (exclusive_) initialize_exclusive();
+        else initialize_shared();
+
+        check(client_->SetEventHandle(buffer_event_), "SetEventHandle");
+        check(client_->GetBufferSize(&buffer_frames_), "GetBufferSize");
+        check(client_->GetService(IID_PPV_ARGS(&render_)), "GetService");
+        period_us_ = static_cast<uint64_t>(buffer_frames_) * 1000000 / format_.rate;
+    }
+
     void activate() {
         client_.Reset();
-        const HRESULT result = device_->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, &client_);
-        if (FAILED(result)) throw std::runtime_error("IMMDevice::Activate failed: " + hresult_text(result));
+        check(device_->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, &client_), "IMMDevice::Activate");
     }
 
     void initialize_exclusive() {
@@ -250,19 +271,17 @@ private:
             result = client_->Initialize(AUDCLNT_SHAREMODE_EXCLUSIVE, AUDCLNT_STREAMFLAGS_EVENTCALLBACK, period, period,
                                          &wave.Format, nullptr);
         }
-        if (FAILED(result)) {
-            if (result == AUDCLNT_E_DEVICE_IN_USE) {
-                throw std::runtime_error("another application is using the device in exclusive mode");
-            }
-            throw std::runtime_error("exclusive Initialize failed: " + hresult_text(result));
+        if (result == AUDCLNT_E_DEVICE_IN_USE) {
+            throw std::runtime_error("another application is using the device in exclusive mode");
         }
+        check(result, "exclusive Initialize");
     }
 
     void initialize_shared() {
         activate();
         WAVEFORMATEX* mix = nullptr;
         HRESULT result = client_->GetMixFormat(&mix);
-        if (FAILED(result)) throw std::runtime_error("GetMixFormat failed: " + hresult_text(result));
+        check(result, "GetMixFormat");
         DeviceFormat actual{};
         const bool known = mix_format_to_device(mix, actual);
         if (known) {
@@ -271,7 +290,7 @@ private:
         }
         CoTaskMemFree(mix);
         if (!known) throw std::runtime_error("unsupported Windows mix format");
-        if (FAILED(result)) throw std::runtime_error("shared Initialize failed: " + hresult_text(result));
+        check(result, "shared Initialize");
         format_ = actual;
     }
 

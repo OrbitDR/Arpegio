@@ -6,6 +6,7 @@ Writes an album of four tracks: two CD-quality WAV, one 24/96 WAV and one quiet 
 only the modulator's noise, which sits above the audible band. Needs numpy for its noise shaper. Without a cover
 it draws a plain one, large enough to get a thumbnail of its own as a real cover would.
 """
+import os
 import shutil
 import struct
 import subprocess
@@ -14,6 +15,7 @@ import zlib
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
+BUILD = os.environ.get("ARPEGIO_BUILD", "release")
 ALBUM = "Pruebas de silencio"
 SECONDS = 40
 COVER_SIZE = 640
@@ -63,7 +65,7 @@ def main():
     noise_shaper = folder.parent / "ntf64.txt"
     with noise_shaper.open("w") as out:
         subprocess.run([sys.executable, str(REPO / "tools" / "measure" / "design_ntf.py"), "64"], stdout=out, check=True)
-    generator = REPO / "build" / "release" / "arpegio-dsdgen.exe"
+    generator = REPO / "build" / BUILD / "arpegio-dsdgen.exe"
     subprocess.run([str(generator), str(folder / "04.dsf"), str(noise_shaper), "2822400", str(SECONDS)], check=True)
     noise_shaper.unlink()
 

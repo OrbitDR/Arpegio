@@ -131,10 +131,11 @@ void Player::set_queue(std::vector<QueueItem> items) {
 
 void Player::update_queue(std::vector<QueueItem> items, size_t current) {
     std::lock_guard lock(mutex_);
-    if (!active_ || jump_request_) {
+    if (!active_ || jump_request_ || play_request_) {
         queue_ = std::move(items);
         if (jump_request_) jump_request_->index = current;
-        else loader_index_ = current;
+        if (play_request_) play_request_->index = current;  // the worker copies it over loader_index_
+        if (!jump_request_) loader_index_ = current;
         return;
     }
 
@@ -522,8 +523,11 @@ void Player::run_queue(double start_seconds) {
 
         auto decoder = item.open ? item.open() : open_decoder(item.path);
         const SourceFormat source = decoder->format();
-        policy.attenuated = volume_.load(std::memory_order_relaxed) < 1.0;
-        const RenderPlan plan = make_render_plan(source, device, policy);
+        const auto plan_for_now = [&] {
+            policy.attenuated = volume_.load(std::memory_order_relaxed) < 1.0;
+            return make_render_plan(source, device, policy);
+        };
+        RenderPlan plan = plan_for_now();
 
         // A new device format means the old stream must play out first. Otherwise the same
         // session continues, with no gap between tracks.
@@ -536,6 +540,9 @@ void Player::run_queue(double start_seconds) {
                 continue;
             }
             close_session();
+            // The old stream can take a minute and a half to play out, and the volume may have come down
+            // meanwhile. A track planned as DSD would then start at full level.
+            plan = plan_for_now();
         }
         if (!session_) open_session(plan, source);
 

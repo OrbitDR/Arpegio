@@ -4,7 +4,7 @@ Punto de partida para retomar el desarrollo. Última sesión: 2026-11-01. El dis
 
 ## Dónde estamos
 
-La aplicación `arpegio.exe` funciona de punta a punta: biblioteca, cola, reproducción y ajustes por dispositivo, con la colección real y por las salidas reales. Toda la verificación de la interfaz se hizo con silencio digital, así que falta que el usuario la escuche con música.
+La aplicación `arpegio.exe` funciona de punta a punta: biblioteca, cola, reproducción y ajustes por dispositivo, con la colección real y por las salidas reales. Tiene volumen por software, ReplayGain, dos remuestreadores, controles de Windows, prueba guiada de DoP e instalador. Toda la verificación de la interfaz se hizo con silencio digital, así que falta que el usuario la escuche con música.
 
 | Fase | Estado |
 |---|---|
@@ -13,7 +13,7 @@ La aplicación `arpegio.exe` funciona de punta a punta: biblioteca, cola, reprod
 | 3. DSD: DSF, DFF, SACD ISO, DST, nativo, DoP, conversión | Hecha |
 | 4. Biblioteca | Hecha |
 | 5. Interfaz en WebView2 | Hecha, pendiente de escucha |
-| 6. Cierre | **Siguiente** |
+| 6. Cierre | Hecha, pendiente de lo que requiere al usuario: ver [Siguiente trabajo](#siguiente-trabajo) |
 
 El repositorio está en la rama `main` y se publica como repositorio público de GitHub. La identidad de git está configurada únicamente para este repositorio, con el correo `noreply` de GitHub. El usuario dejó el control de versiones a criterio del asistente.
 
@@ -30,7 +30,9 @@ Como es público, ningún archivo ni mensaje de commit debe llevar rutas persona
    ```
 
 2. Abrir `build\release\arpegio.exe`. Sus datos están en `%LOCALAPPDATA%\Arpegio`.
-3. Seguir con el [cierre](#cierre).
+3. Seguir con el [trabajo pendiente](#siguiente-trabajo).
+
+`scripts\package.bat` genera el instalador en `build\dist\installer`. Compila el preset `dist`, en otra carpeta, así que no molesta a un `arpegio.exe` abierto desde `build\release`.
 
 ## Prueba de escucha
 
@@ -109,8 +111,14 @@ Lo único que reabriría el asunto en PCM es una prueba a ciegas con el mismo vo
 
 Los detalles y cifras están en [DESIGN.md](DESIGN.md#verificación-hecha-el-2026-10-30).
 
-- 135 pruebas automáticas sin fallos, también en 8 ejecuciones seguidas con la CPU al 100 %. Diez fallos introducidos a propósito en el motor, cinco en la biblioteca, doce en la detección de MQA y las secciones y trece en los clics y en liberar el dispositivo fueron detectados.
-- Aplicación real con la colección real y silencio digital: `tools\ui\run.ps1` hace 137 comprobaciones sobre la ventana, sin errores de consola. Ver [Interfaz](DESIGN.md#verificación-de-la-interfaz-2026-10-31).
+- 189 pruebas automáticas sin fallos. Diez fallos introducidos a propósito en el motor, cinco en la biblioteca, doce en la detección de MQA y las secciones y trece en los clics y en liberar el dispositivo fueron detectados.
+- Aplicación real con la colección real y silencio digital: `tools\ui\run.ps1` recorre la ventana sin errores de consola. Ver [Interfaz](DESIGN.md#verificación-de-la-interfaz-2026-10-31).
+- A 0 dB, lo que reciben los drivers ASIO reales del Topping y del SMSL coincide al 100 % con un WAV 16/44.1 y otro 24/96 después de añadir el volumen. A −6.0206 dB la ganancia es exacta y el residuo es el del dither. Ver [Cierre](DESIGN.md#verificación-del-cierre-2026-11-01).
+- SMSL: WASAPI exclusivo, compartido y ASIO, PCM, DoP y DSD nativo, también DSD512, sin eventos tardíos ni cortes, con silencio y señal inaudible.
+- Remuestreo con r8brain y SoX: tono, banda alta, alias, longitud y alineación, en seis pares de frecuencias. Ver [Remuestreo](DESIGN.md#remuestreo).
+- Volumen, ReplayGain, remuestreador y prueba de DoP en la ventana real con eventos de ratón y teclado reales, con el DSD por ASIO en el Topping.
+- Controles de Windows leídos y manejados desde fuera de la aplicación, y teclas multimedia reales.
+- Instalador: instalar, abrir y desinstalar en este equipo, conservando los datos.
 - Clics con eventos de ratón reales: cada botón de la barra inferior acepta el clic en todos sus puntos, también si una actualización de estado llega durante la pulsación o si su icono cambia entre presionar y soltar. Ver [Clics](DESIGN.md#verificación-de-los-clics-2026-11-01).
 - Liberar el dispositivo contra otro proceso real, en WASAPI exclusivo y en ASIO con DSD nativo.
 - `LOOPBACK` del MiniFuse: coincidencia total a 24 bits en 44.1, 96 y 192 kHz.
@@ -129,6 +137,13 @@ Los detalles y cifras están en [DESIGN.md](DESIGN.md#verificación-hecha-el-202
 ## Implementado pero sin verificar
 
 - **Interfaz con música real.** Todas las rutas se recorrieron con silencio digital y señal inaudible. Falta escuchar seek, siguiente, anterior, cambio de salida y liberar el dispositivo con música, por si hay clics.
+- Controles de Windows a la vista. La sesión se leyó y se manejó desde fuera con la misma API que usan el panel de medios y la pantalla de bloqueo, y las teclas multimedia reales funcionan, pero nadie miró la pantalla de bloqueo. Los botones de la miniatura en la barra de tareas no se han visto: solo se probó que el programa recibe sus clics.
+- Volumen con música: la rampa de 20 ms se midió sobre los datos, no de oído.
+- Volumen en un driver con formato distinto de Int32LSB: el Topping y el SMSL solo usan ese. Los demás formatos están cubiertos por pruebas, no en un DAC real.
+- Prueba de DoP con la respuesta de una persona: se recorrió por ASIO y WASAPI exclusivo con clics reales y el flujo DoP sale, pero nadie miró la pantalla del DAC durante esa prueba. En el Topping el mismo flujo ya se había visto como DSD el 2026-10-31. En el SMSL, nunca.
+- Si el SMSL muestra DSD nativo y DoP como tales: las rutas corrieron sin errores, pero con silencio y sin mirar su pantalla.
+- SoX con música real: medido con tonos, y en la aplicación solo con silencio.
+- Instalación desde otro equipo o sin WebView2: el ciclo de instalar, abrir y desinstalar se probó en este equipo, que ya tiene el runtime.
 - Reordenar la cola arrastrando: probado con eventos simulados, no con el ratón.
 - Paso sin hueco: pasó de oído en SACD, CUE y archivos separados, sin comparar la salida real muestra a muestra. `asio_tap` ya permite hacerlo.
 - DoP por ASIO con el volumen de Windows bajo: ASIO no consulta ese volumen, y no se sabe si le afecta.
@@ -139,7 +154,6 @@ Los detalles y cifras están en [DESIGN.md](DESIGN.md#verificación-hecha-el-202
 - ALAC: TagLib identifica los 37 `.m4a` de la colección como AAC, así que no hay ningún ALAC real con el que probar que sea exacto.
 - APE: pasó de oído, sin comprobar contra un hash.
 - Mezcla de 6 canales a estéreo: pasó de oído, sin prueba automática.
-- Calidad medida de r8brain en esta integración: solo corrió con silencio.
 - Vigilancia de carpetas sobre la colección real: solo se probó con carpetas temporales.
 - Hoja CUE en el bloque `CUESHEET` nativo de FLAC: solo se lee la etiqueta del mismo nombre.
 - Liberar el dispositivo mientras otro programa espera para tomarlo: se comprobó que puede abrirlo después, no que un programa ya abierto recupere el sonido por sí solo.
@@ -161,8 +175,10 @@ Con tasas tan bajas, 39 ejecuciones no bastan para afirmar que las dos últimas 
 
 ## Limitaciones actuales del motor
 
-- No hay volumen por software ni ReplayGain.
-- DoP automático depende de que el usuario lo confirme en Ajustes. Falta la prueba guiada.
+- DSD nativo y DoP no tienen volumen por software. Con el volumen por debajo de 0 dB, el DSD se convierte a PCM.
+- ReplayGain solo lee etiquetas, no analiza el audio. En la colección real las llevan 227 de las 5 184 pistas, así que el resto no cambia de nivel.
+- ReplayGain no se aplica a DSD nativo ni a DoP. Esas pistas siguen a su nivel aunque tengan etiquetas: en la colección real solo una.
+- Bajar el volumen no cambia una pista DSD que ya suene nativa, porque el control está desactivado. Subirlo a 0 dB no devuelve al DSD nativo la pista en curso, sino la siguiente.
 - La precarga en RAM es el anillo: 20 s del formato de salida, con un mínimo de 32 MB, que a 44.1 kHz son unos 90 s.
 - Editar la cola en los tramos que el anillo ya contiene provoca un hueco breve, porque el anillo se rellena desde lo que se oye. Añadir al final no lo provoca.
 - Cambiar de dispositivo o sus ajustes reinicia el flujo en la misma posición, con un hueco breve.
@@ -185,39 +201,43 @@ Con tasas tan bajas, 39 ejecuciones no bastan para afirmar que las dos últimas 
 - Solo tema oscuro y solo español. Los mensajes de error poco habituales del motor llegan en inglés.
 - Sin selección múltiple de pistas.
 - La cola no se refresca si un reescaneo cambia las etiquetas de una pista que ya está en ella.
-- Sin controles de Windows en la pantalla de bloqueo ni en la miniatura de la barra de tareas. Las teclas multimedia sí funcionan, salvo que otro programa las tenga reservadas.
 - Actualizar la lista de dispositivos exige parar la música: cargar otra copia de un driver ASIO en uso puede tumbarlo. El botón de liberar el dispositivo basta para eso. En WASAPI compartido está desactivado, y la única forma de parar es vaciar la cola.
 - Sin arrastrar archivos desde el Explorador.
 - WebView2 ocupa unos 420 MB de memoria en 7 procesos.
 
 ## Siguiente trabajo
 
-### Cierre
+Lo que solo puede hacer el usuario:
 
-- Escucha de la interfaz con música.
-- Prueba guiada de DoP con silencio DSD, mirando la pantalla del DAC.
-- Controles multimedia de Windows en la pantalla de bloqueo y en la barra de tareas.
-- Volumen por software y ReplayGain.
-- libsoxr como segunda opción de remuestreo. Ya está descargado.
-- Instalador.
-- Opcional: Kernel Streaming, que Audirvana ofrece y el usuario no pidió.
+- Escuchar la interfaz con música: seek, siguiente, anterior, cambio de salida y liberar el dispositivo, por si hay clics.
+- Bajar y subir el volumen con música.
+- Mirar los controles de la pantalla de bloqueo y los botones de la miniatura en la barra de tareas.
+- Si quiere usar DoP por WASAPI, hacer la prueba guiada mirando la pantalla del DAC. Por ASIO, el Topping y el SMSL usan DSD nativo y no la necesitan.
+
+Opcional, sin pedir por nadie:
+
+- Analizar el volumen de las pistas sin etiquetas, porque ReplayGain apenas tiene efecto en la colección real. El análisis no escribiría en los archivos: se guardaría en el catálogo.
+- Kernel Streaming, que Audirvana ofrece y el usuario no pidió.
+- Firmar el instalador, que requiere un certificado de pago.
+- Decidir el nombre definitivo. Si cambia, hay que tocar el AppUserModelID de `src/app/main.cpp` e `installer/arpegio.iss`, los recursos de `src/app/arpegio.rc` y la carpeta `%LOCALAPPDATA%\Arpegio`.
 
 ## Mapa del código
 
 | Carpeta | Contenido |
 |---|---|
-| `src/audio/` | Formatos de dispositivo, anillo sin bloqueos, cuantización y dither |
+| `src/audio/` | Formatos de dispositivo, anillo sin bloqueos, cuantización, dither y volumen |
 | `src/dsd/` | Tabla DSD a PCM, filtro FIR, DoP, decodificador DST |
 | `src/decode/` | Interfaz `Decoder` y un decodificador por formato; SACD en `sacd_iso`; rangos CUE en `range_decoder` |
-| `src/engine/` | `render_plan` decide la ruta, `pipeline` convierte, `player` coordina |
+| `src/engine/` | `render_plan` decide la ruta, `pipeline` convierte, `resampler` cambia la frecuencia, `player` coordina |
 | `src/output/` | ASIO, WASAPI e hilo STA |
 | `src/formats/` | Lector DSF y escritor WAV |
 | `src/library/` | `library` coordina; `library_store` es el catálogo en SQLite; `scanner` lee las carpetas; `metadata`, `mqa`, `artwork` y `cue_sheet` son sus piezas; `track_source` conecta con el motor |
-| `src/app/` | `controller` es la aplicación, sin ventanas y por tanto comprobable; `main_window` es la ventana con WebView2; `settings` son los ajustes |
+| `src/app/` | `controller` es la aplicación, sin ventanas y por tanto comprobable; `main_window` es la ventana con WebView2; `media_controls` son los controles de Windows; `settings` son los ajustes |
 | `ui/` | La página, en JavaScript sin dependencias. `store` guarda el estado, `router` las vistas, `views/` cada vista y `signal` la ruta de la señal |
 | `cli/` | `arpegio-cli` y `arpegio-dsd2wav` |
 | `tests/` | Pruebas automáticas, con salidas simuladas en `test_player.cpp` y `test_controller.cpp`, y la biblioteca en `test_library.cpp` |
 | `tools/` | Generador DSD, informes, `arpegio-library`, `measure/` y `ui/` |
+| `installer/` | Script de Inno Setup, que se ejecuta desde `scripts\package.bat` |
 
 ## Reproducir las verificaciones
 
@@ -258,7 +278,7 @@ powershell ..\..\tools\measure\asio_tap.ps1 off
 & $py $t\compare_tap.py "pista.wav" (Get-ChildItem ..\tap\captures\*.raw).FullName
 ```
 
-Cada programa deja en `build\tap\captures` un `.log` con las llamadas que hizo al driver. Las capturas ocupan unos 21 MB por minuto a 44.1 kHz.
+Cada programa deja en `build\tap\captures` un `.log` con las llamadas que hizo al driver. Las capturas ocupan unos 21 MB por minuto a 44.1 kHz. Con `--volume-db -6.0206`, `compare_tap.py` debe dar una ganancia de 0.5 y un residuo de −146 dBFS.
 
 Biblioteca sobre la colección real, con la base de datos fuera del repositorio:
 
@@ -277,14 +297,14 @@ Aplicación real, con silencio digital por las salidas reales. La carpeta de mú
 powershell -File tools\ui\run.ps1 -MusicFolder "D:\Música" -Device topping
 ```
 
-Abre y cierra la ventana varias veces, minimiza, pulsa teclas multimedia, abre el dispositivo desde otro proceso y cambia el formato del DAC. Con la colección real tarda unos 5 minutos. Las capturas quedan en `%TEMP%\arpegio-ui-check\shots`. `tools\ui\check.mjs` sirve para escribir otras pruebas: controla la aplicación por el protocolo de DevTools de Chromium con `--devtools`. Devuelve error si falla cualquier comprobación de un paso.
+`-Build dist` usa el ejecutable del preset `dist`. Conviene cerrar antes Arpegio y Audirvana: la prueba necesita las salidas libres, y otra sesión multimedia se quedaría con las teclas. Abre y cierra la ventana varias veces, minimiza, pulsa teclas multimedia, abre el dispositivo desde otro proceso y cambia el formato del DAC. Con la colección real tarda unos 5 minutos. Las capturas quedan en `%TEMP%\arpegio-ui-check\shots`. `tools\ui\check.mjs` sirve para escribir otras pruebas: controla la aplicación por el protocolo de DevTools de Chromium con `--devtools`. Devuelve error si falla cualquier comprobación de un paso.
 
 Señal inaudible para probar hardware: `arpegio-dsdgen` sin tonos, por ejemplo `.\arpegio-dsdgen.exe quiet64.dsf ntf64.txt 2822400 20`. Para otras tasas, generar antes el diseño con `design_ntf.py 128` o `256`.
 
 ## Entorno y trampas conocidas
 
-- Windows 11 x64, i5-12600K, 32 GB. VS Build Tools 2022 sin ATL, Windows SDK 10.0.26100, CMake 4.4, Ninja, Node 24, Rust 1.99, Python 3.14.
-- DAC Topping DX1 II y Arturia MiniFuse 2. Música en `D:\Música`.
+- Windows 11 x64, i5-12600K, 32 GB. VS Build Tools 2022 sin ATL, Windows SDK 10.0.26100, CMake 4.4, Ninja, Node 24, Rust 1.99, Python 3.14, Inno Setup 6.7 para el usuario.
+- DAC Topping DX1 II, SMSL y Arturia MiniFuse 2. El driver ASIO del SMSL se llama `USB DAC ASIO`, sin la marca, y su salida WASAPI `Altavoces (SMSL USB DAC)`: `USB DAC` sirve para los dos en `-Device`. Música en `D:\Música`.
 - Una compilación fallida deja el binario anterior, y las pruebas corren sobre él. Hay que mirar la salida de compilación antes de fiarse del resultado. Pasa, por ejemplo, con `arpegio.exe` abierto, que da `LNK1168`.
 - `scripts\build.bat` imprime un aviso de `vswhere`. Es inofensivo.
 - Evitar parches largos de Python en línea desde Bash: se rompen. Es mejor escribir el script en un archivo.
@@ -302,3 +322,9 @@ Señal inaudible para probar hardware: `arpegio-dsdgen` sin tonos, por ejemplo `
 - En ASIO, `windowsGainDb` no es una lectura: `current_hardware_gain_db` devuelve el 0 por defecto aunque Windows esté más bajo. El valor real está en el endpoint WASAPI del mismo DAC.
 - Con `asio_tap.ps1 on`, ese driver queda en silencio para todos los programas hasta `off`. Antes de reproducir hay que comprobar que el programa cargó `asio_tap.dll`: si no, sonaría de verdad. `-Audible` deja pasar el sonido y sigue grabando.
 - Un programa empaquetado en MSIX, como Audirvana, ve sus escrituras en `AppData` redirigidas a su paquete. Por eso las capturas van junto a la DLL, en `build\tap`, y no en `%TEMP%`.
+- El `RenderPlan` de una pista se decide antes de oírse. Lo que dependa del momento, como el volumen, debe recalcularse al abrir el flujo.
+- Al cerrar DSD nativo por ASIO, la salida WASAPI del mismo DAC falta unos 0.8 s. Un programa que arranque en ese hueco no la lista, y hace falta Buscar dispositivos. `run.ps1` espera 2 s entre pasos por eso.
+- Un paso de `tools/ui` que no encuentra lo que debe medir tiene que fallar: dos de ellos daban por buena una medida que no habían hecho. Hay que leer las cifras, no solo el código de salida.
+- Una prueba con `for (const json& x : h.call(...).at("list"))` recorre un temporal ya destruido. Hay que guardar antes el resultado de `call`.
+- `Get-StartApps` tarda unos segundos en enterarse de un acceso directo nuevo o borrado.
+- Un heredoc largo en Bash se rompe si el texto lleva apóstrofes, como los comentarios en inglés. Para añadir código, mejor las herramientas de edición.

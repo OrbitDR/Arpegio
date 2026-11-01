@@ -13,21 +13,34 @@ python scripts\fetch_deps.py
 scripts\build.bat release test
 ```
 
+El instalador sale de `scripts\package.bat`, que necesita Inno Setup 6 (`winget install --id JRSoftware.InnoSetup --scope user`) y deja `build\dist\installer\Arpegio-VERSIÓN-x64.exe`. Se instala para el usuario actual, sin permisos de administrador. No está firmado, así que Windows puede avisar la primera vez. Al desinstalar se conservan el catálogo y los ajustes.
+
 ## Usar
 
-La aplicación es `build\release\arpegio.exe`. Guarda su catálogo y sus ajustes en `%LOCALAPPDATA%\Arpegio`, y solo lee la música.
+La aplicación es `build\release\arpegio.exe`, o la copia instalada. Guarda su catálogo y sus ajustes en `%LOCALAPPDATA%\Arpegio`, y solo lee la música.
 
 Junto al buscador están las secciones por tipo de archivo: MQA, DSD, CD, PCM HighRes y Lossy. MQA solo se reconoce: Arpegio no lo decodifica.
 
-En Ajustes se elige la salida. Por defecto usa WASAPI compartido, que no es bit-perfect. No hay volumen por software, así que el volumen se ajusta en el DAC, y con WASAPI conviene tener el de Windows al 100 %.
+En Ajustes se elige la salida. Por defecto usa WASAPI compartido, que no es bit-perfect. Con WASAPI conviene tener el volumen de Windows al 100 %.
 
 Por ASIO y WASAPI exclusivo, Arpegio retiene el dispositivo mientras suena y también en pausa, y ningún otro programa puede usarlo. El enchufe dorado a la derecha del indicador bit-perfect lo libera: detiene la música y queda desconectado en gris. Reproducir vuelve a tomar el dispositivo desde el mismo punto. En WASAPI compartido no retiene nada, y el enchufe queda en gris.
+
+El volumen de la barra inferior está en 0 dB y, mientras siga ahí, no toca ninguna muestra. Al bajarlo la salida deja de ser bit-perfect, así que lo mejor sigue siendo dejarlo en 0 dB y usar el volumen del DAC. Cada dispositivo guarda su nivel. El DSD nativo y el DoP no tienen volumen por software: con el control por debajo de 0 dB, el DSD se convierte a PCM para no sonar a nivel completo.
+
+En Ajustes también están:
+
+- ReplayGain por pista o por álbum, a partir de las etiquetas. Las pistas sin etiquetas no cambian, y Arpegio no las analiza.
+- El remuestreador, r8brain o SoX, que solo actúa si el dispositivo no admite la frecuencia de la pista o en WASAPI compartido.
+- La prueba de DoP, que envía silencio DSD y pregunta qué indica la pantalla del DAC.
+
+La pista que suena aparece también en los controles de Windows: el panel de medios, la pantalla de bloqueo y los botones de la miniatura en la barra de tareas. Las teclas multimedia del teclado las envía Windows al programa que esté sonando.
 
 | Teclas | Acción |
 |---|---|
 | Espacio | Reproducir o pausar |
 | Ctrl+Izquierda, Ctrl+Derecha | Pista anterior o siguiente |
 | Mayús+Izquierda, Mayús+Derecha | Retroceder o avanzar 10 s |
+| Ctrl+Arriba, Ctrl+Abajo | Subir o bajar el volumen 1 dB |
 | Ctrl+F | Buscar |
 | Alt+Izquierda, Alt+Derecha | Atrás o adelante en las vistas |
 
@@ -41,7 +54,7 @@ cd build\release
 .\arpegio-cli.exe play "disco.iso" --output asio --device topping --track 3
 ```
 
-`--output` acepta `asio`, `exclusive` o `shared`. `--device` busca por parte del nombre. `--dsd` acepta `auto`, `native`, `dop` o `pcm`.
+`--output` acepta `asio`, `exclusive` o `shared`. `--device` busca por parte del nombre. `--dsd` acepta `auto`, `native`, `dop` o `pcm`. `--volume-db` y `--resampler` hacen lo mismo que sus controles de la aplicación.
 
 La biblioteca se prueba con `arpegio-library`, que nunca escribe en la carpeta de música:
 
@@ -54,4 +67,4 @@ La biblioteca se prueba con `arpegio-library`, que nunca escribe en la carpeta d
 
 ## Licencia
 
-GPLv3. El SDK ASIO de Steinberg se usa bajo su opción GPLv3 y no se incluye en el repositorio: lo descarga `scripts/fetch_deps.py`. ASIO es una marca de Steinberg. Las licencias de las dependencias están en [third_party/README.md](third_party/README.md).
+GPLv3. El SDK ASIO de Steinberg se usa bajo su opción GPLv3 y no se incluye en el repositorio: lo descarga `scripts/fetch_deps.py`. ASIO es una marca de Steinberg. Las licencias de las dependencias están en [third_party/README.md](third_party/README.md), y el instalador las lleva en la carpeta `licenses`.

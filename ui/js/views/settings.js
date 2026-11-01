@@ -56,10 +56,19 @@ function dopTest(device) {
   ];
   const closing = [{ label: 'Cerrar', primary: true, onclick: () => { dialog.close(); stop(); } }];
 
+  // Only on a change: a button replaced between press and release loses the click.
+  let shown = '';
+  const show = (lines, actions) => {
+    const text = lines.join('\n');
+    if (text === shown) return;
+    shown = text;
+    dialog.update('Prueba de DoP', lines, actions);
+  };
+
   const follow = async () => {
     const test = await call('devices.dopTestStatus').catch(() => null);
     if (test?.error) {
-      dialog.update('Prueba de DoP', [`No se pudo enviar DoP: ${test.error}`], closing);
+      show([`No se pudo enviar DoP: ${test.error}`], closing);
       return;
     }
     if (test?.sending) {
@@ -68,7 +77,7 @@ function dopTest(device) {
       if (test.windowsGainDb) {
         lines.push(`El volumen de Windows de este dispositivo está en ${decibels(test.windowsGainDb)}, y eso impide reconocer DoP. Ponlo al 100 % y repite la prueba.`);
       }
-      dialog.update('Prueba de DoP', lines, asking);
+      show(lines, asking);
     }
     timer = setTimeout(follow, DOP_POLL_MS);
   };
@@ -136,13 +145,13 @@ function deviceOptions(device) {
         onclick: () => configure({ dsd: mode }),
       }, DSD_MODES[mode][0])))));
     rows.push(h('div.setting',
-      h('label.setting-text.dop-check',
+      h('label.setting-text.dop-check', { htmlFor: 'dop-confirmed' },
         h('strong', 'Mi DAC reconoce DoP'),
         h('p', 'Ni ASIO ni WASAPI permiten detectarlo. Pruébalo mirando la pantalla del DAC.')),
-      h('button.button.dop-test', { type: 'button', onclick: () => dopTest(device) }, 'Probar'),
+      h('button.button', { type: 'button', onclick: () => dopTest(device) }, 'Probar'),
       h('input', {
+        id: 'dop-confirmed',
         type: 'checkbox',
-        ariaLabel: 'Mi DAC reconoce DoP',
         checked: chosen.dopConfirmed,
         onchange: (event) => configure({ dopConfirmed: event.target.checked }),
       })));

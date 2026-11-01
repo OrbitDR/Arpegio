@@ -1,9 +1,12 @@
-// What the interface costs while music plays: CPU of the application and all its WebView2 processes.
+// What the interface costs while music plays: CPU of the application and all its WebView2 processes. Needs
+// ARPEGIO_EXE, the path of the running executable. With no process to read there is no measure, so it stops.
 import { execFileSync } from 'node:child_process';
 
 const SECONDS = 12;
 const sample = `
-$root = (Get-Process arpegio | Where-Object { $_.Path -like '*build*release*' } | Select-Object -First 1).Id
+$ErrorActionPreference = 'Stop'
+$root = (Get-Process arpegio | Where-Object { $_.Path -eq $env:ARPEGIO_EXE } | Select-Object -First 1).Id
+if (-not $root) { throw 'the application process was not found' }
 $all = Get-CimInstance Win32_Process -Property ProcessId,ParentProcessId
 $tree = @($root); $grew = $true
 while ($grew) { $grew = $false; foreach ($p in $all) { if ($tree -contains $p.ParentProcessId -and $tree -notcontains $p.ProcessId) { $tree += $p.ProcessId; $grew = $true } } }
@@ -46,6 +49,9 @@ export default async function run(page, { sleep }) {
 
   await page.go({ view: 'albums' });
   await measure('playing, albums view');
+  await page.call('player.setVolume', { db: -12 });
+  await measure('playing with the volume down, albums view');
+  await page.call('player.setVolume', { db: 0 });
   await page.go({ view: 'now' });
   await measure('playing, now playing view');
 

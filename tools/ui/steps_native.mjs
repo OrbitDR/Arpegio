@@ -16,6 +16,7 @@ public static class Host {
   [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int s);
   [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
   [DllImport("user32.dll")] public static extern void keybd_event(byte k, byte s, uint f, UIntPtr e);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr SendMessageW(IntPtr h, uint m, IntPtr w, IntPtr l);
   public static IntPtr Find() { return FindWindowW("ArpegioMainWindow", null); }
 }
 '@
@@ -24,6 +25,12 @@ if ($h -eq [IntPtr]::Zero) { throw 'the window was not found' }`;
 
 const powershell = (script) => execFileSync('powershell', ['-NoProfile', '-Command', `${WINDOW}\n${script}`], { encoding: 'utf8' }).trim();
 const mediaKey = (code) => powershell(`[Host]::keybd_event(${code}, 0, 0, [UIntPtr]::Zero); [Host]::keybd_event(${code}, 0, 2, [UIntPtr]::Zero)`);
+
+// What Windows sends when a button under the taskbar thumbnail is pressed: WM_COMMAND with THBN_CLICKED.
+const THUMB_PREVIOUS = 1;
+const THUMB_TOGGLE = 2;
+const THUMB_NEXT = 3;
+const thumbnailButton = (id) => powershell(`[void][Host]::SendMessageW($h, 0x111, [IntPtr](0x18000000 + ${id}), [IntPtr]::Zero)`);
 
 export default async function run(page, { sleep }) {
   const status = () => page.eval(`import('/js/store.js').then((s) => s.state.status)`);
@@ -69,6 +76,18 @@ export default async function run(page, { sleep }) {
   } catch {
     check(false, 'media keys: another program may own them');
   }
+
+  thumbnailButton(THUMB_TOGGLE);
+  await until(`status.state === 'paused'`, 2500);
+  thumbnailButton(THUMB_TOGGLE);
+  await until(`status.state === 'playing'`, 2500);
+  thumbnailButton(THUMB_NEXT);
+  await until(`status.index === 1`, 2500);
+  thumbnailButton(THUMB_PREVIOUS);
+  await sleep(600);
+  thumbnailButton(THUMB_PREVIOUS);
+  await until(`status.index === 0`, 2500);
+  check(true, 'the taskbar thumbnail buttons reach the application');
 
   // Music goes on behind a minimized window, and the page comes back up to date.
   powershell('[void][Host]::ShowWindow($h, 6)');

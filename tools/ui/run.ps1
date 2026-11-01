@@ -14,6 +14,7 @@ Set-Location $repo
 Remove-Item $Data -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force "$Data\native", "$Data\outputs", "$Data\media", "$Data\volume", "$Data\dop" | Out-Null
 $silence = "$Data\silence"
+$env:ARPEGIO_BUILD = $Build
 python tools\ui\make_silence.py $silence
 
 $exe = (Resolve-Path "build\$Build\arpegio.exe").Path
@@ -39,6 +40,9 @@ foreach ($run in @(
     @('dop', 'steps_dop.mjs'),
     @('outputs', 'steps_cpu.mjs')
 )) {
+    # A step that ends in native DSD leaves the DAC without its Windows endpoint for a moment, and the next
+    # start would list the devices in that gap.
+    Start-Sleep -Seconds 2
     node tools\ui\check.mjs --exe $exe --data "$Data\$($run[0])" --out $shots --steps "tools\ui\$($run[1])"
     if ($LASTEXITCODE) { exit 1 }
 }

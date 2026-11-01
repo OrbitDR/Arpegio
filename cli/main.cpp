@@ -91,6 +91,7 @@ int usage() {
           "       arpegio-cli play FILE... --output asio|exclusive|shared --device TEXT\n"
           "                   [--dsd auto|native|dop|pcm] [--dop-confirmed] [--gain-db DB]\n"
           "                   [--first-channel N] [--period-ms N] [--buffer N] [--wire s32-24|s24]\n"
+          "                   [--volume-db DB] [--resampler r8brain|soxr]\n"
           "                   [--start SECONDS] [--last SECONDS] [--seconds SECONDS] [--track N] [--multichannel]\n"
           "       arpegio-cli play --db DB --album ID [--from N] [same options as above]\n"
           "       arpegio-cli decode FILE [OUT.raw] [--seconds S]\n"
@@ -114,6 +115,7 @@ int play(int argc, wchar_t** argv) {
     int64_t album = 0;
     size_t first = 0;
     double last = 0.0;
+    double volume_db = 0.0;
 
     for (int i = 2; i < argc; ++i) {
         const std::wstring arg = argv[i];
@@ -133,6 +135,10 @@ int play(int argc, wchar_t** argv) {
             policy.dop_confirmed = true;
         } else if (arg == L"--gain-db" && has_value) {
             policy.dsd_to_pcm_gain_db = wcstod(argv[++i], nullptr);
+        } else if (arg == L"--volume-db" && has_value) {
+            volume_db = wcstod(argv[++i], nullptr);
+        } else if (arg == L"--resampler" && has_value) {
+            policy.resampler = std::wstring(argv[++i]) == L"soxr" ? ResamplerKind::Soxr : ResamplerKind::R8brain;
         } else if (arg == L"--first-channel" && has_value) {
             options.first_channel = _wtoi(argv[++i]);
         } else if (arg == L"--period-ms" && has_value) {
@@ -218,6 +224,7 @@ int play(int argc, wchar_t** argv) {
     Player player;
     player.set_device(*device, options);
     player.set_policy(policy);
+    player.set_volume(std::pow(10.0, volume_db / 20.0));
     player.set_queue(std::move(queue));
     player.play(first, start);
 

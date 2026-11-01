@@ -714,6 +714,44 @@ TEST(dsd_is_converted_while_the_volume_is_down) {
     CHECK(f.player.wait_until_stopped(5000));
 }
 
+TEST(a_volume_lowered_while_the_next_track_waits_still_reaches_it) {
+    Fixture f;
+    QueueItem dsd;
+    dsd.open = [] { return std::make_unique<DsdPatternDecoder>(2822400, 2822400 / 8 * 2); };
+    f.player.set_queue({ramp(1, 96000 * 2), dsd});
+    f.player.play();
+    hold_at_first_sound(f.player);
+    Sleep(100);  // the loader has reached the DSD track, planned it and is waiting for the PCM to play out
+
+    f.player.set_volume(0.25);
+    f.player.set_paused(false);
+    for (int i = 0; i < 4000 && f.player.status().queue_index != 1; ++i) Sleep(1);
+    CHECK(f.player.status().queue_index == 1);
+    for (int i = 0; i < 4000 && !f.player.status().stream_open; ++i) Sleep(1);
+    CHECK(f.player.status().plan.path == RenderPath::DsdToPcm);
+    f.player.stop();
+    CHECK(f.player.wait_until_stopped(5000));
+}
+
+TEST(a_stream_at_full_level_goes_back_to_native_dsd_once_the_volume_is_up) {
+    Fixture f;
+    QueueItem dsd;
+    dsd.open = [] { return std::make_unique<DsdPatternDecoder>(2822400, 2822400 / 8 * 2); };
+    f.player.set_volume(0.25);
+    f.player.set_queue({ramp(1, 96000 * 2), dsd});
+    f.player.play();
+    hold_at_first_sound(f.player);
+    Sleep(100);
+
+    f.player.set_volume(1.0);
+    f.player.set_paused(false);
+    for (int i = 0; i < 4000 && f.player.status().queue_index != 1; ++i) Sleep(1);
+    for (int i = 0; i < 4000 && !f.player.status().stream_open; ++i) Sleep(1);
+    CHECK(f.player.status().plan.path == RenderPath::DsdNative);
+    f.player.stop();
+    CHECK(f.player.wait_until_stopped(5000));
+}
+
 TEST(native_dsd_is_left_alone_if_the_volume_moves_under_it) {
     Fixture f;
     QueueItem item;

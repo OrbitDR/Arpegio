@@ -90,7 +90,9 @@ HICON draw_icon(const Shape& shape, int size, COLORREF color) {
         }
     }
 
-    const HBITMAP mask = CreateBitmap(size, size, 1, 1, nullptr);
+    // With an alpha channel the mask is only a formality, but it must exist.
+    const std::vector<uint8_t> empty_mask(static_cast<size_t>((size + 15) / 16 * 2) * size);
+    const HBITMAP mask = CreateBitmap(size, size, 1, 1, empty_mask.data());
     ICONINFO icon{};
     icon.fIcon = TRUE;
     icon.hbmColor = pixels;

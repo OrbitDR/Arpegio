@@ -118,6 +118,18 @@ export default async function run(page, { sleep }) {
   await until(`status.plan && status.plan.path === 'dsdNative'`, 20000);
   await sleep(800);
 
+  // Leaving native DSD, drivers take their Windows endpoint away for about a second, and the music must wait.
+  const shared = list.find((d) => d.kind === 'shared' && device.test(d.name));
+  for (const target of [exclusive, shared].filter(Boolean)) {
+    const native = await status();
+    await page.call('devices.select', { key: target.key });
+    await until(`status.plan && status.plan.path === 'dsdToPcm' && status.position > ${native.position + 0.5}`, 10000);
+    await log(`from native DSD to ${target.kind}`);
+    await page.call('devices.select', { key: asio.key });
+    await until(`status.plan && status.plan.path === 'dsdNative' && status.position > ${native.position + 1}`, 10000);
+    await sleep(800);
+  }
+
   await page.call('player.toggle');
   await until(`status.state === 'paused'`);
   await log('paused');

@@ -2,6 +2,7 @@
 #include <cmath>
 #include <cstdio>
 #include <numbers>
+#include <tuple>
 #include <utility>
 #include <vector>
 
