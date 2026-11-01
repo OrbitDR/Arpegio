@@ -777,6 +777,22 @@ TEST(controller_applies_replay_gain_from_the_first_play_of_a_stopped_queue) {
     CHECK(h.until([&] { return std::abs(h.status().at("trackGainDb").get<double>() + 3.0) < 1e-6; }));
 }
 
+TEST(controller_changes_the_resampler_in_a_running_stream) {
+    Harness h;
+    const std::vector<int64_t> ids = h.library_with_tracks();
+    h.call("queue.play", {{"tracks", ids}});
+    CHECK(h.until([&] { return !h.status().at("plan").is_null(); }));
+    CHECK(h.status().at("plan").at("resampler") == "r8brain");
+
+    h.call("player.setResampler", {{"name", "soxr"}});
+    CHECK(h.until([&] {
+        const json plan = h.status().at("plan");
+        return !plan.is_null() && plan.at("resampler") == "soxr";
+    }));
+    CHECK(h.call("app.state").at("resampler") == "soxr");
+    CHECK(load_settings(h.data / "settings.json").resampler == "soxr");
+}
+
 TEST(controller_dop_test_sends_dop_and_records_the_answer) {
     Harness h;
     h.open();
@@ -876,6 +892,7 @@ TEST(settings_round_trip) {
     settings.sacd_multichannel = true;
     settings.repeat = "track";
     settings.replay_gain = "album";
+    settings.resampler = "soxr";
     settings.queue_index = 7;
     settings.queue_position = 12.5;
     settings.window = WindowPlacement{10, 20, 1000, 800, true};
@@ -887,6 +904,7 @@ TEST(settings_round_trip) {
     CHECK(loaded.sacd_multichannel);
     CHECK(loaded.repeat == "track");
     CHECK(loaded.replay_gain == "album");
+    CHECK(loaded.resampler == "soxr");
     CHECK(loaded.queue_index == 7);
     CHECK_NEAR(loaded.queue_position, 12.5, 1e-9);
     CHECK(loaded.window && loaded.window->maximized && loaded.window->width == 1000);

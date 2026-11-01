@@ -163,6 +163,7 @@ json plan_json(const RenderPlan& plan) {
             {"channels", plan.device.channels},
             {"validBits", plan.device.valid_bits},
             {"resampleFrom", plan.resample_from},
+            {"resampler", resampler_name(plan.resampler)},
             {"mixChannels", plan.mix_channels},
             {"gainDb", gain_db(plan.gain)},
             {"ditherBits", plan.dither_bits},
@@ -247,7 +248,8 @@ void Controller::register_handlers() {
                          {"playlists", playlists_json()},
                          {"devices", devices_json()},
                          {"sacdMultichannel", settings_.sacd_multichannel},
-                         {"replayGain", settings_.replay_gain}};
+                         {"replayGain", settings_.replay_gain},
+                         {"resampler", settings_.resampler}};
          }},
 
         {"library.albums", [this](const json&) { return albums_json(library_->store().albums()); }},
@@ -485,6 +487,13 @@ void Controller::register_handlers() {
              set_replay_gain(params.at("mode").get<std::string>());
              return json{};
          }},
+        {"player.setResampler",
+         [this](const json& params) {
+             settings_.resampler = params.at("name").get<std::string>();
+             save_settings_quietly();
+             apply_output();
+             return json{};
+         }},
 
         {"devices.list", [this](const json&) { return devices_json(); }},
         {"devices.refresh",
@@ -715,6 +724,7 @@ void Controller::apply_output() {
     policy.dsd = dsd_policy(chosen.dsd);
     policy.dop_confirmed = chosen.dop_confirmed;
     policy.dsd_to_pcm_gain_db = chosen.dsd_gain_db;
+    policy.resampler = settings_.resampler == "soxr" ? ResamplerKind::Soxr : ResamplerKind::R8brain;
 
     // A stream keeps the device and rules it opened with, so a change needs a new one.
     const PlayerStatus status = player_.status();

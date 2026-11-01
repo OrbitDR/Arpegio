@@ -8,6 +8,7 @@
 #include "audio/device_format.h"
 #include "decode/decoder.h"
 #include "dsd/dsd_pcm_plan.h"
+#include "engine/resampler.h"
 #include "output/output.h"
 
 namespace arpegio {
@@ -20,6 +21,7 @@ struct PlaybackPolicy {
     double dsd_to_pcm_gain_db = 3.0;
     int dither_bits = 24;
     bool attenuated = false;  // the software volume is down, which DSD cannot follow while it stays DSD
+    ResamplerKind resampler = ResamplerKind::R8brain;
 };
 
 enum class RenderPath { Pcm, DsdNative, DsdDop, DsdToPcm };
@@ -40,6 +42,7 @@ struct RenderPlan {
     bool bit_perfect = false;
     DsdPcmPlan dsd{};           // valid for DsdToPcm
     uint32_t resample_from = 0; // input rate of the resampler, 0 when not resampling
+    ResamplerKind resampler = ResamplerKind::R8brain;
     bool mix_channels = false;  // source and device channel counts differ
     double gain = 1.0;
     int dither_bits = 0;
@@ -50,7 +53,8 @@ struct RenderPlan {
 
     bool operator==(const RenderPlan& other) const {
         return path == other.path && device == other.device && resample_from == other.resample_from &&
-               mix_channels == other.mix_channels && gain == other.gain && dsd.divider == other.dsd.divider;
+               resampler == other.resampler && mix_channels == other.mix_channels && gain == other.gain &&
+               dsd.divider == other.dsd.divider;
     }
 };
 

@@ -29,6 +29,11 @@ const REPLAY_GAIN_MODES = {
   album: ['Por álbum', 'Iguala el nivel entre álbumes y respeta las diferencias dentro de cada uno. La pista deja de ser bit-perfect.'],
 };
 
+const RESAMPLERS = {
+  r8brain: ['r8brain', 'Filtro de fase lineal con 218 dB de rechazo, el mismo perfil que Audirvana.'],
+  soxr: ['SoX', 'Filtro de fase lineal a 32 bits, con unos 190 dB de rechazo.'],
+};
+
 const DOP_POLL_MS = 400;
 
 const send = (method, params) => call(method, params).catch(reportError);
@@ -223,27 +228,38 @@ function outputSection() {
     body);
 }
 
+function segments(choices, active, onchoose) {
+  return h('div.segments', { role: 'radiogroup' }, Object.entries(choices).map(([value, [label]]) => h('button.segment', {
+    type: 'button',
+    class: value === active ? 'on' : '',
+    role: 'radio',
+    ariaChecked: value === active,
+    onclick: () => onchoose(value),
+  }, label)));
+}
+
 function playbackSection() {
-  const active = REPLAY_GAIN_MODES[state.replayGain] ? state.replayGain : 'off';
-  const choose = (mode) => {
-    state.replayGain = mode;
-    send('player.setReplayGain', { mode });
-    set('replayGain', mode);
-  };
+  const gainMode = REPLAY_GAIN_MODES[state.replayGain] ? state.replayGain : 'off';
+  const resampler = RESAMPLERS[state.resampler] ? state.resampler : 'r8brain';
   return h('section.settings-section',
     h('div.section-head', h('h2', 'Reproducción')),
     h('div.settings-card',
       h('div.setting',
         h('div.setting-text',
           h('strong', 'ReplayGain'),
-          h('p', `${REPLAY_GAIN_MODES[active][1]} Las pistas sin etiquetas no cambian, y una ganancia nunca lleva el pico por encima del máximo.`)),
-        h('div.segments', { role: 'radiogroup' }, Object.entries(REPLAY_GAIN_MODES).map(([mode, [label]]) => h('button.segment', {
-          type: 'button',
-          class: mode === active ? 'on' : '',
-          role: 'radio',
-          ariaChecked: mode === active,
-          onclick: () => choose(mode),
-        }, label))))));
+          h('p', `${REPLAY_GAIN_MODES[gainMode][1]} Las pistas sin etiquetas no cambian, y una ganancia nunca lleva el pico por encima del máximo.`)),
+        segments(REPLAY_GAIN_MODES, gainMode, (mode) => {
+          send('player.setReplayGain', { mode });
+          set('replayGain', mode);
+        })),
+      h('div.setting',
+        h('div.setting-text',
+          h('strong', 'Remuestreo'),
+          h('p', `${RESAMPLERS[resampler][1]} Solo actúa si el dispositivo no admite la frecuencia de la pista, o en WASAPI compartido.`)),
+        segments(RESAMPLERS, resampler, (name) => {
+          send('player.setResampler', { name });
+          set('resampler', name);
+        }))));
 }
 
 function folderRow(folder) {
@@ -326,6 +342,7 @@ export function settingsView(page) {
     watch('devices', draw),
     watch('folders', draw),
     watch('replayGain', draw),
+    watch('resampler', draw),
     watch('library', (library) => {
       if (wasScanning !== library.scanning) draw();
       else if (library.scanning) body.querySelector('.scan-status')?.replaceWith(scanStatus(library));

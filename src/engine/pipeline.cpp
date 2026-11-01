@@ -1,7 +1,5 @@
 #include "engine/pipeline.h"
 
-#include <CDSPResampler.h>
-
 #include <algorithm>
 #include <array>
 #include <cstring>
@@ -11,11 +9,6 @@ namespace arpegio {
 namespace {
 
 constexpr uint32_t kChunksPerSecond = 4;
-
-// Audirvana's stored r8brain profile: 99.5 % of Nyquist, 218 dB, linear phase.
-constexpr double kTransitionBandPercent = 1.0;
-constexpr double kStopBandDb = 218.0;
-constexpr int kResamplerBlock = 1 << 14;
 
 constexpr double kMinus3Db = 0.70710678118654752;
 
@@ -32,53 +25,6 @@ constexpr std::array<uint8_t, 256> make_bit_reverse() {
 constexpr auto kBitReverse = make_bit_reverse();
 
 }  // namespace
-
-class Resampler {
-public:
-    Resampler(uint32_t from, uint32_t to, int channels) : channels_(channels), input_(kResamplerBlock), output_(channels) {
-        for (int ch = 0; ch < channels; ++ch) {
-            filters_.push_back(std::make_unique<r8b::CDSPResampler>(static_cast<double>(from), static_cast<double>(to),
-                                                                    kResamplerBlock, kTransitionBandPercent, kStopBandDb,
-                                                                    r8b::fprLinearPhase));
-        }
-    }
-
-    // Appends resampled interleaved frames to `out`.
-    void process(const double* interleaved, size_t frames, std::vector<double>& out) {
-        for (size_t offset = 0; offset < frames; offset += kResamplerBlock) {
-            const int block = static_cast<int>(std::min<size_t>(kResamplerBlock, frames - offset));
-            int produced = 0;
-            for (int ch = 0; ch < channels_; ++ch) {
-                if (interleaved) {
-                    for (int i = 0; i < block; ++i) input_[i] = interleaved[(offset + i) * channels_ + ch];
-                } else {
-                    std::fill_n(input_.data(), block, 0.0);
-                }
-                double* result = nullptr;
-                produced = filters_[ch]->process(input_.data(), block, result);
-                output_[ch] = result;
-            }
-            const size_t base = out.size();
-            out.resize(base + static_cast<size_t>(produced) * channels_);
-            double* write = out.data() + base;
-            for (int i = 0; i < produced; ++i) {
-                for (int ch = 0; ch < channels_; ++ch) *write++ = output_[ch][i];
-            }
-        }
-    }
-
-    size_t tail_frames() const { return static_cast<size_t>(filters_[0]->getInLenBeforeOutPos(0)); }
-
-    void clear() {
-        for (auto& filter : filters_) filter->clear();
-    }
-
-private:
-    int channels_;
-    std::vector<double> input_;
-    std::vector<double*> output_;
-    std::vector<std::unique_ptr<r8b::CDSPResampler>> filters_;
-};
 
 Pipeline::Pipeline(const SourceFormat& source, const RenderPlan& plan) : source_(source), plan_(plan) {
     if (source.dsd) {
@@ -100,7 +46,7 @@ Pipeline::Pipeline(const SourceFormat& source, const RenderPlan& plan) : source_
         quantizer_ = std::make_unique<Quantizer>(plan.device.encoding, plan.dither_bits);
     }
     if (plan.resample_from != 0) {
-        resampler_ = std::make_unique<Resampler>(plan.resample_from, plan.device.rate, plan.device.channels);
+        resampler_ = make_resampler(plan.resampler, plan.resample_from, plan.device.rate, plan.device.channels);
     }
 }
 
@@ -233,7 +179,7 @@ void Pipeline::flush(std::vector<uint8_t>& out) {
     if (resampler_) {
         const int channels = plan_.device.channels;
         std::vector<double> tail;
-        resampler_->process(nullptr, resampler_->tail_frames(), tail);
+        resampler_->flush(tail);
         if (!tail.empty() && plan_.gain != 1.0) {
             for (double& sample : tail) sample *= plan_.gain;
         }

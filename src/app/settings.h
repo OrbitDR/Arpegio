@@ -36,6 +36,7 @@ struct Settings {
     bool sacd_multichannel = false;
     std::string repeat = "off";  // off, queue or track
     std::string replay_gain = "off";  // off, track or album
+    std::string resampler = "r8brain";  // r8brain or soxr
     size_t queue_index = 0;
     double queue_position = 0.0;
     std::optional<WindowPlacement> window;

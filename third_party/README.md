@@ -6,7 +6,7 @@ Las descarga `scripts/fetch_deps.py`, con versión y SHA-256 fijos. No se versio
 |---|---|---|
 | asiosdk 2.3.4 | ASIO | GPLv3 o licencia de Steinberg |
 | r8brain-free-src 7.6 | Remuestreo | MIT |
-| libsoxr 0.1.3 | Remuestreo alternativo, aún sin usar | LGPL 2.1 |
+| libsoxr 0.1.3 | Remuestreo alternativo. Se compila solo su motor de doble precisión | LGPL 2.1 |
 | flac 1.5.0, ogg 1.3.6, vorbis 1.3.7 | Decodificación | BSD |
 | wavpack 5.9.0 | Decodificación | BSD |
 | Monkey's Audio SDK 13.45 | Decodificación | BSD |

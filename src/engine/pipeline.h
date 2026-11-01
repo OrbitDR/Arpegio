@@ -10,10 +10,9 @@
 #include "dsd/dop.h"
 #include "dsd/dsd_fir.h"
 #include "engine/render_plan.h"
+#include "engine/resampler.h"
 
 namespace arpegio {
-
-class Resampler;
 
 class Pipeline {
 public:

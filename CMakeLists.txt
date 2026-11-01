@@ -108,6 +108,31 @@ target_include_directories(monkeysaudio SYSTEM INTERFACE third_party/monkeysaudi
 target_compile_definitions(monkeysaudio PUBLIC PLATFORM_WINDOWS UNICODE _UNICODE)
 target_compile_options(monkeysaudio PRIVATE /EHsc /w)
 
+# Only the double-precision engine, the one that reaches 32-bit quality, and without the run-time SIMD choice
+# of the project's own build, which leaves this list and its configuration in our hands.
+set(SOXR_ROOT third_party/soxr/src)
+add_library(soxr STATIC EXCLUDE_FROM_ALL
+    ${SOXR_ROOT}/soxr.c
+    ${SOXR_ROOT}/data-io.c
+    ${SOXR_ROOT}/dbesi0.c
+    ${SOXR_ROOT}/filter.c
+    ${SOXR_ROOT}/fft4g64.c
+    ${SOXR_ROOT}/cr.c
+    ${SOXR_ROOT}/cr64.c
+)
+foreach(setting AVCODEC_FOUND AVUTIL_FOUND WITH_PFFFT HAVE_BIGENDIAN WITH_CR32 WITH_CR32S WITH_CR64S WITH_VR32
+                WITH_FLOAT_STD_PREC_CLOCK WITH_DEV_TRACE)
+    set(${setting} 0)
+endforeach()
+foreach(setting HAVE_FENV_H HAVE_STDBOOL_H HAVE_STDINT_H HAVE_LRINT WITH_CR64 WITH_HI_PREC_CLOCK)
+    set(${setting} 1)
+endforeach()
+configure_file(third_party/soxr/soxr-config.h.in soxr/soxr-config.h)
+target_include_directories(soxr PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/soxr)
+target_include_directories(soxr SYSTEM INTERFACE ${SOXR_ROOT})
+target_compile_definitions(soxr PRIVATE SOXR_LIB _USE_MATH_DEFINES)
+target_compile_options(soxr PRIVATE /w)
+
 add_compile_options(/W4 /wd4324 /permissive- /utf-8 /Zc:__cplusplus /EHsc)
 add_compile_definitions(UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)
 
@@ -137,6 +162,7 @@ add_library(arpegio_core STATIC
     src/decode/vorbis_decoder.cpp
     src/decode/mf_decoder.cpp
     src/engine/render_plan.cpp
+    src/engine/resampler.cpp
     src/engine/pipeline.cpp
     src/engine/player.cpp
     src/output/output.cpp
@@ -159,7 +185,7 @@ target_include_directories(arpegio_core PUBLIC src)
 target_include_directories(arpegio_core SYSTEM PRIVATE third_party/asiosdk/common third_party/r8brain third_party/minimp3 ${TAGLIB_INCLUDE_DIRS})
 target_link_libraries(arpegio_core
     PUBLIC avrt ole32 advapi32 user32 uuid mfplat mfreadwrite mfuuid propsys shlwapi windowscodecs
-    PRIVATE FLAC vorbisfile vorbis wavpack monkeysaudio sqlite3 tag)
+    PRIVATE FLAC vorbisfile vorbis wavpack monkeysaudio soxr sqlite3 tag)
 
 add_library(arpegio_app STATIC
     src/app/controller.cpp
@@ -209,6 +235,7 @@ add_executable(arpegio-tests
     tests/test_dsd_fir.cpp
     tests/test_quantizer.cpp
     tests/test_volume.cpp
+    tests/test_resampler.cpp
     tests/test_render_plan.cpp
     tests/test_player.cpp
     tests/test_library.cpp

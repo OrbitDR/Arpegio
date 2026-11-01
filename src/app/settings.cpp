@@ -47,6 +47,7 @@ Settings load_settings(const std::filesystem::path& file) {
         settings.sacd_multichannel = root.value("sacdMultichannel", settings.sacd_multichannel);
         settings.repeat = root.value("repeat", settings.repeat);
         settings.replay_gain = root.value("replayGain", settings.replay_gain);
+        settings.resampler = root.value("resampler", settings.resampler);
         settings.queue_index = root.value("queueIndex", settings.queue_index);
         settings.queue_position = root.value("queuePosition", settings.queue_position);
         if (const auto devices = root.find("devices"); devices != root.end()) {
@@ -72,6 +73,7 @@ void save_settings(const std::filesystem::path& file, const Settings& settings) 
                  {"sacdMultichannel", settings.sacd_multichannel},
                  {"repeat", settings.repeat},
                  {"replayGain", settings.replay_gain},
+                 {"resampler", settings.resampler},
                  {"queueIndex", settings.queue_index},
                  {"queuePosition", settings.queue_position},
                  {"devices", json::object()}};

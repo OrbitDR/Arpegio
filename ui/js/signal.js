@@ -4,6 +4,7 @@ import { decibels, dsdName, formatLine, kilohertz } from './format.js';
 import { selectedDevice } from './store.js';
 
 const KIND_NAMES = { asio: 'ASIO', exclusive: 'WASAPI exclusivo', shared: 'WASAPI compartido' };
+const RESAMPLER_NAMES = { r8brain: 'r8brain', soxr: 'SoX' };
 
 function processingLines(plan, track, status) {
   switch (plan.path) {
@@ -17,7 +18,7 @@ function processingLines(plan, track, status) {
     lines.push(`DSD a PCM: FIR ÷${plan.firDivider}, corte en ${kilohertz(plan.firCutoffHz)} kHz`);
     if (Math.abs(plan.gainDb) > 0.01) lines.push(`Ganancia de ${decibels(plan.gainDb, { plus: true })}`);
   }
-  if (plan.resampleFrom) lines.push(`Remuestreo r8brain: ${kilohertz(plan.resampleFrom)} a ${kilohertz(plan.rate)} kHz`);
+  if (plan.resampleFrom) lines.push(`Remuestreo ${RESAMPLER_NAMES[plan.resampler]}: ${kilohertz(plan.resampleFrom)} a ${kilohertz(plan.rate)} kHz`);
   if (plan.mixChannels) lines.push(`Mezcla de ${track?.channels ?? '?'} a ${plan.channels} canales`);
   const volumeDown = status.muted || status.volumeDb < 0;
   if (status.muted || status.volumeDb <= status.volumeFloorDb) lines.push('Volumen por software: silencio');

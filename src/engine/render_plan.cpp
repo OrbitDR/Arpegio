@@ -72,6 +72,7 @@ RenderPlan plan_pcm(const SourceFormat& source, const DeviceInfo& device, const 
     plan.path = RenderPath::Pcm;
     plan.device = pcm_device_format(mode, output_channels(device, source.channels));
     plan.resample_from = exact ? 0 : source.rate;
+    plan.resampler = policy.resampler;
     plan.mix_channels = plan.device.channels != source.channels;
     const bool reduces_depth = wire_resolution(mode.encoding) < source.bits;
     // Mono copied to both channels keeps every sample, so it stays bit-perfect.
@@ -114,6 +115,7 @@ RenderPlan plan_conversion(const SourceFormat& source, const DeviceInfo& device,
     plan.device = pcm_device_format(*mode, output_channels(device, source.channels));
     plan.dsd = *dsd_plan;
     plan.resample_from = dsd_plan->needs_resampler ? dsd_plan->fir_rate : 0;
+    plan.resampler = policy.resampler;
     plan.mix_channels = plan.device.channels != source.channels;
     plan.gain = std::pow(10.0, policy.dsd_to_pcm_gain_db / 20.0);
     plan.dither_bits = std::min(policy.dither_bits, wire_resolution(mode->encoding));
