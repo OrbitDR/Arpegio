@@ -84,10 +84,14 @@ export function icon(name, size = 20) {
 }
 
 export function iconButton(name, label, onclick, { size = 20, cls = '' } = {}) {
-  return h('button.icon-button', { type: 'button', title: label, ariaLabel: label, onclick, class: cls }, icon(name, size));
+  return h('button.icon-button', { type: 'button', title: label, ariaLabel: label, onclick, class: cls, dataset: { icon: name } },
+    icon(name, size));
 }
 
+// The player bar calls this on every status update, so the page only changes when the icon does.
 export function setIcon(button, name, size = 20) {
+  if (button.dataset.icon === name) return;
+  button.dataset.icon = name;
   button.replaceChildren(icon(name, size));
 }
 

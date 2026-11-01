@@ -16,6 +16,7 @@ const send = (method, params) => call(method, params).catch(reportError);
 
 export function createPlayerBar() {
   let shownTrack = undefined;
+  let shownQuality = '';
   let dragging = false;
   let holdUntil = 0;
 
@@ -56,13 +57,14 @@ export function createPlayerBar() {
     ariaLabel: 'Posición',
     onpointerdown: () => {
       dragging = true;
+      // Not in onchange, which stays silent when the press leaves the value where it was.
+      addEventListener('pointerup', () => { dragging = false; }, { once: true });
     },
     oninput: () => {
       paintSeek();
       elapsed.textContent = time(Number(seek.value));
     },
     onchange: () => {
-      dragging = false;
       holdUntil = performance.now() + SEEK_HOLD_MS;
       send('player.seek', { seconds: Number(seek.value) });
     },
@@ -118,13 +120,17 @@ export function createPlayerBar() {
     remaining.textContent = time(status.duration);
     seek.disabled = !track;
 
-    quality.replaceChildren();
-    if (track) {
-      quality.append(h('span.bar-format', shortFormat(track)));
-      if (status.plan) {
-        quality.append(status.bitPerfect
-          ? h('span.badge.good', icon('check', 14), 'Bit-perfect')
-          : h('span.badge.warn', 'Procesado'));
+    const qualityKey = `${track ? shortFormat(track) : ''}|${status.plan ? status.bitPerfect : ''}`;
+    if (qualityKey !== shownQuality) {
+      shownQuality = qualityKey;
+      quality.replaceChildren();
+      if (track) {
+        quality.append(h('span.bar-format', shortFormat(track)));
+        if (status.plan) {
+          quality.append(status.bitPerfect
+            ? h('span.badge.good', icon('check', 14), 'Bit-perfect')
+            : h('span.badge.warn', 'Procesado'));
+        }
       }
     }
   }

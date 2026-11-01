@@ -34,6 +34,9 @@ body {
 h1, h2, h3, p { margin: 0; }
 button, input, select { font: inherit; color: inherit; }
 button { background: none; border: 0; padding: 0; cursor: pointer; }
+/* The press lands on the button itself. If it landed on an icon that is replaced before the release,
+   Chromium would drop the click. */
+button * { pointer-events: none; }
 a { color: inherit; text-decoration: none; }
 img { display: block; }
 svg { display: block; flex: none; }
@@ -336,6 +339,7 @@ a.album-artist:hover { color: var(--accent); }
   height: 14px;
   background: var(--accent);
   clip-path: polygon(0 0, 100% 50%, 0 100%);
+  pointer-events: none;
 }
 
 .table-head {

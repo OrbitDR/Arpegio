@@ -95,7 +95,7 @@ export function createQueuePanel() {
   watch('status', (status) => {
     if (status.index !== shownIndex) {
       shownIndex = status.index;
-      if (!panel.hidden) list?.redraw();
+      for (const [index, element] of list?.items ?? []) element.classList.toggle('current', index === status.index);
     }
   });
   watch('queueOpen', (open) => {

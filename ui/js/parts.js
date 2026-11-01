@@ -1,6 +1,6 @@
 // Pieces shared by the views: covers, album cards, track rows and page headers.
 import { albumMenu, playAlbum, playTracks, setFavorite, trackMenu } from './actions.js';
-import { h, icon, iconButton } from './dom.js';
+import { h, icon, iconButton, setIcon } from './dom.js';
 import { qualityChip, shortFormat, time } from './format.js';
 import { go } from './router.js';
 import { currentTrack } from './store.js';
@@ -77,7 +77,7 @@ function favoriteButton(track) {
   const button = iconButton(track.favorite ? 'favorite' : 'favoriteOutline', 'Favorito', async (event) => {
     event.stopPropagation();
     await setFavorite(track, !track.favorite);
-    button.replaceChildren(icon(track.favorite ? 'favorite' : 'favoriteOutline', 18));
+    setIcon(button, track.favorite ? 'favorite' : 'favoriteOutline', 18);
     button.classList.toggle('on', track.favorite);
   }, { size: 18, cls: `row-favorite${track.favorite ? ' on' : ''}` });
   return button;

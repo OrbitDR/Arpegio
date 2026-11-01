@@ -164,6 +164,13 @@ function folderRow(folder) {
     }, { size: 18 }));
 }
 
+function scanStatus(library) {
+  const share = library.total ? library.done / library.total : 0;
+  return h('div.scan-status',
+    h('p', library.total ? `Leyendo ${library.done.toLocaleString('es-ES')} de ${library.total.toLocaleString('es-ES')} archivos` : 'Buscando música…'),
+    h('div.progress', h('i', { style: { width: `${share * 100}%` } })));
+}
+
 function librarySection() {
   const { folders, library } = state;
   const addFolder = async () => {
@@ -173,8 +180,6 @@ function librarySection() {
       reportError(error);
     }
   };
-  const scanning = library?.scanning;
-  const share = library?.total ? library.done / library.total : 0;
 
   return h('section.settings-section',
     h('div.section-head', h('h2', 'Biblioteca')),
@@ -190,11 +195,7 @@ function librarySection() {
           title: 'Vuelve a leer todos los archivos, aunque no hayan cambiado',
           onclick: () => send('library.rescan', { force: true }),
         }, 'Releer todo'))),
-    scanning
-      ? h('div.scan-status',
-        h('p', library.total ? `Leyendo ${library.done.toLocaleString('es-ES')} de ${library.total.toLocaleString('es-ES')} archivos` : 'Buscando música…'),
-        h('div.progress', h('i', { style: { width: `${share * 100}%` } })))
-      : null,
+    library?.scanning ? scanStatus(library) : null,
     library?.error ? h('div.notice.bad', icon('warning', 20), h('p', library.error)) : null,
     library?.warnings?.length
       ? h('details.warnings',
@@ -227,13 +228,14 @@ export function settingsView(page) {
   };
   draw();
 
-  // Controls must not be replaced under the pointer, so a scan only redraws when its state changes.
+  // Controls must not be replaced under the pointer, so a running scan only redraws its own progress.
   let wasScanning = state.library?.scanning;
   const stops = [
     watch('devices', draw),
     watch('folders', draw),
     watch('library', (library) => {
-      if (library.scanning || wasScanning !== library.scanning) draw();
+      if (wasScanning !== library.scanning) draw();
+      else if (library.scanning) body.querySelector('.scan-status')?.replaceWith(scanStatus(library));
       wasScanning = library.scanning;
     }),
   ];

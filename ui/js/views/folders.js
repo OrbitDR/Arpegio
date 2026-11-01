@@ -32,9 +32,9 @@ function allTracks(node) {
 
 function folderRow(name, node, route) {
   const open = () => go(route);
-  return h('button.folder-row', { type: 'button', onclick: open },
+  return h('button.folder-row', { type: 'button', title: name, onclick: open },
     icon('folder', 22),
-    h('span.folder-name', { title: name }, name),
+    h('span.folder-name', name),
     h('span.folder-count', count(node.total, 'pista', 'pistas')),
     icon('chevron', 18));
 }
