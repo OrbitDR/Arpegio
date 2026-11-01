@@ -299,5 +299,6 @@ Señal inaudible para probar hardware: `arpegio-dsdgen` sin tonos, por ejemplo `
 - La colección real descubre lo que las pruebas sintéticas no: un `.flac` con ID3v2 delante cerraba el programa, y había híbridos `.iso.wv`, FLAC sin longitud en la cabecera y hojas con tiempos fuera de norma. Tras tocar decodificadores o escáner, repetir `scan` y `verify`.
 - Windows sella los archivos con un reloj de unos 15 ms. Una prueba que reescribe un archivo del mismo tamaño justo después de escanearlo debe mover la fecha a mano.
 - `third_party/` no se versiona. `scripts/fetch_deps.py` lo recrea con versiones y SHA-256 fijos.
+- En ASIO, `windowsGainDb` no es una lectura: `current_hardware_gain_db` devuelve el 0 por defecto aunque Windows esté más bajo. El valor real está en el endpoint WASAPI del mismo DAC.
 - Con `asio_tap.ps1 on`, ese driver queda en silencio para todos los programas hasta `off`. Antes de reproducir hay que comprobar que el programa cargó `asio_tap.dll`: si no, sonaría de verdad. `-Audible` deja pasar el sonido y sigue grabando.
 - Un programa empaquetado en MSIX, como Audirvana, ve sus escrituras en `AppData` redirigidas a su paquete. Por eso las capturas van junto a la DLL, en `build\tap`, y no en `%TEMP%`.

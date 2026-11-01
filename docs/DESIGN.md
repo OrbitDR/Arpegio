@@ -139,6 +139,8 @@ Con la misma pista real, un WAV 16/44.1, desde su primera muestra:
 
 Los 2 040 831 frames comunes son idénticos entre los dos programas. Ninguno aplica ganancia, dither ni remuestreo a esa pista, y el driver recibe los mismos bytes. Con esas pistas la diferencia que se oyó no está en las muestras, así que no se cambió el motor. `arpegio-cli` dio el mismo resultado.
 
+El nivel coincide hasta donde se puede medir desde el equipo. La ganancia ajustada a las capturas es 1.000000000, el volumen por software de Audirvana estaba en 1.0, también al terminar la sesión de escucha, y Arpegio no tiene volumen. El volumen de Windows del Topping se mantuvo en 0.00 dB en las 78 lecturas hechas mientras Audirvana abría, reproducía y cerraba, y Arpegio no tiene ninguna llamada que lo cambie. Esas lecturas son de la medida, no del momento de la escucha. El volumen físico del DAC es común a los dos y no se puede leer desde el equipo. Un cambio de Audirvana por HID tampoco se vería aquí, solo en la pantalla del DAC.
+
 El comparador no es indulgente: sobre copias alteradas de una captura real detecta un solo sample cambiado en 1 unidad de 32 bits, −0.01 dB de ganancia, dither a 24 bits, canales cruzados y polaridad invertida.
 
 Lo que esto no cubre:
