@@ -16,6 +16,15 @@ const SORTS = {
   added: ['Añadido', (a, b) => b.added - a.added || compareText(a.title, b.title)],
 };
 
+// The kinds of file in the top bar. The catalogue decides which one an album belongs to.
+export const SECTIONS = [
+  { key: 'mqa', label: 'MQA', hint: 'Álbumes con MQA, detectado en el propio audio' },
+  { key: 'dsd', label: 'DSD', hint: 'DSF, DFF y SACD' },
+  { key: 'cd', label: 'CD', hint: 'PCM sin pérdida de 16 bits, hasta 48 kHz' },
+  { key: 'hires', label: 'PCM HighRes', hint: 'PCM sin pérdida de más de 16 bits o más de 48 kHz' },
+  { key: 'lossy', label: 'Lossy', hint: 'MP3, AAC y otros formatos con pérdida' },
+];
+
 let sortKey = 'artist';
 
 export function loadAlbums() {
@@ -29,13 +38,21 @@ function noLibrary() {
     h('button.button.primary', { type: 'button', onclick: addFolder }, 'Añadir carpeta'));
 }
 
-export async function albumsView(page) {
-  const albums = await loadAlbums();
+export async function albumsView(page, { section }) {
+  const all = await loadAlbums();
   const scroller = document.getElementById('scroller');
 
-  if (!albums.length) {
+  if (!all.length) {
     if (state.library?.scanning) page.append(emptyState('album', 'Leyendo tu música…', 'Los álbumes aparecerán aquí en cuanto termine.'));
     else page.append(noLibrary());
+    return null;
+  }
+
+  const albums = section ? all.filter((album) => album.section === section) : all;
+  const title = SECTIONS.find(({ key }) => key === section)?.label ?? 'Álbumes';
+  if (!albums.length) {
+    page.append(pageHeader(title), emptyState('album', 'No hay álbumes en esta sección',
+      state.library?.scanning ? 'Aparecerán aquí a medida que se lea la biblioteca.' : null));
     return null;
   }
 
@@ -47,7 +64,7 @@ export async function albumsView(page) {
     render: (index) => albumCard(sorted[index]),
   });
 
-  page.append(pageHeader('Álbumes', count(albums.length, 'álbum', 'álbumes'),
+  page.append(pageHeader(title, count(albums.length, 'álbum', 'álbumes'),
     select('Ordenar por', sortKey, Object.entries(SORTS).map(([key, [label]]) => [key, label]), (value) => {
       sortKey = value;
       sorted.sort(SORTS[sortKey][1]);

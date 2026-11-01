@@ -7,7 +7,7 @@ import { createQueuePanel } from './queuepanel.js';
 import { currentRoute, defineView, go, onRoute, refresh, setOutlet, start } from './router.js';
 import { createSidebar } from './sidebar.js';
 import { connect, forgetCatalogue, set, state, watch } from './store.js';
-import { albumView, albumsView } from './views/albums.js';
+import { SECTIONS, albumView, albumsView } from './views/albums.js';
 import { artistView, artistsView } from './views/artists.js';
 import { foldersView } from './views/folders.js';
 import { nowView } from './views/now.js';
@@ -27,6 +27,20 @@ const ENGINE_MESSAGES = [
 
 function engineMessage(text) {
   return ENGINE_MESSAGES.find(([pattern]) => pattern.test(text))?.[1] ?? `No se pudo reproducir: ${text}`;
+}
+
+// Pressing the open section again goes back to all the albums.
+function createSectionLinks() {
+  const links = SECTIONS.map(({ key, label, hint }) => {
+    const link = h('button.section-link', {
+      type: 'button',
+      title: hint,
+      onclick: () => go(currentRoute()?.section === key ? { view: 'albums' } : { view: 'albums', section: key }),
+    }, label);
+    onRoute((route) => link.classList.toggle('active', route.section === key));
+    return link;
+  });
+  return h('nav.section-links', { ariaLabel: 'Tipo de archivo' }, links);
 }
 
 function createTopBar() {
@@ -54,7 +68,8 @@ function createTopBar() {
   return h('div.top-bar',
     iconButton('back', 'Atrás', () => history.back()),
     iconButton('forward', 'Adelante', () => history.forward()),
-    h('label.search', icon('search', 18), input));
+    h('label.search', icon('search', 18), input),
+    createSectionLinks());
 }
 
 function bindKeys() {

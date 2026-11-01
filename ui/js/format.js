@@ -39,6 +39,7 @@ export function isLossy(item) {
 
 // The label on a cover. CD quality carries none, so the ones that appear mean something.
 export function qualityChip(item) {
+  if (item.mqa) return 'MQA';
   if (item.dsd) return dsdName(item.rate);
   if (isLossy(item) || !item.rate) return '';
   if (item.bits > 16 || item.rate > 48000) return `${item.bits}/${kilohertz(item.rate)}`;
@@ -49,11 +50,11 @@ export function formatLine(track) {
   const channels = track.channels === 1 ? 'mono' : track.channels === 2 ? 'estéreo' : `${track.channels} canales`;
   if (track.dsd) return `${track.codec} · ${dsdName(track.rate)} · ${(track.rate / 1e6).toFixed(4)} MHz · ${channels}`;
   const depth = isLossy(track) ? `${track.bitrate} kbit/s` : `${track.bits} bits`;
-  return `${track.codec} · ${depth} · ${kilohertz(track.rate)} kHz · ${channels}`;
+  return `${track.mqa ? `${track.codec} MQA` : track.codec} · ${depth} · ${kilohertz(track.rate)} kHz · ${channels}`;
 }
 
 export function shortFormat(track) {
   if (track.dsd) return dsdName(track.rate);
   if (isLossy(track)) return `${track.codec} ${track.bitrate}`;
-  return `${track.bits}/${kilohertz(track.rate)}`;
+  return `${track.mqa ? 'MQA ' : ''}${track.bits}/${kilohertz(track.rate)}`;
 }

@@ -27,6 +27,8 @@ if ($LASTEXITCODE) { exit 1 }
 $window = (Get-Content "$Data\native\settings.json" -Raw | ConvertFrom-Json).window
 if (-not $window) { 'FAIL the window place was not saved'; exit 1 }
 "ok   window place saved: $($window.width) x $($window.height) at $($window.x), $($window.y)"
+node tools\ui\check.mjs --data "$Data\native" --out $shots --steps tools\ui\steps_sections.mjs
+if ($LASTEXITCODE) { exit 1 }
 node tools\ui\check.mjs --data "$Data\outputs" --out $shots --steps tools\ui\steps_outputs.mjs
 if ($LASTEXITCODE) { exit 1 }
 node tools\ui\check.mjs --data "$Data\outputs" --out $shots --steps tools\ui\steps_interaction.mjs
