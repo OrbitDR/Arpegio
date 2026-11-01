@@ -12,6 +12,7 @@
 #include "decode/dsd_silence.h"
 #include "library/paths.h"
 #include "library/track_source.h"
+#include "version.h"
 
 using nlohmann::json;
 
@@ -249,7 +250,8 @@ void Controller::register_handlers() {
                          {"devices", devices_json()},
                          {"sacdMultichannel", settings_.sacd_multichannel},
                          {"replayGain", settings_.replay_gain},
-                         {"resampler", settings_.resampler}};
+                         {"resampler", settings_.resampler},
+                         {"version", ARPEGIO_VERSION}};
          }},
 
         {"library.albums", [this](const json&) { return albums_json(library_->store().albums()); }},

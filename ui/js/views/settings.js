@@ -331,7 +331,7 @@ export function settingsView(page) {
   const draw = () => {
     const open = [...body.querySelectorAll('details[open]')].length > 0;
     body.replaceChildren(outputSection(), playbackSection(), librarySection(),
-      h('section.settings-section.about', h('p.muted', 'Arpegio 0.1 · Software libre bajo licencia GPLv3')));
+      h('section.settings-section.about', h('p.muted', `Arpegio ${state.version} · Software libre bajo licencia GPLv3`)));
     if (open) body.querySelector('details')?.setAttribute('open', '');
   };
   draw();

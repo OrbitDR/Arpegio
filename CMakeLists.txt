@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.25)
-project(arpegio VERSION 0.1.0 LANGUAGES C CXX)
+project(arpegio VERSION 0.2.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -187,10 +187,13 @@ target_link_libraries(arpegio_core
     PUBLIC avrt ole32 advapi32 user32 uuid mfplat mfreadwrite mfuuid propsys shlwapi windowscodecs
     PRIVATE FLAC vorbisfile vorbis wavpack monkeysaudio soxr sqlite3 tag)
 
+configure_file(src/app/version.h.in app/version.h)
+
 add_library(arpegio_app STATIC
     src/app/controller.cpp
     src/app/settings.cpp
 )
+target_include_directories(arpegio_app PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/app)
 target_include_directories(arpegio_app SYSTEM PUBLIC third_party/json/single_include)
 target_link_libraries(arpegio_app PUBLIC arpegio_core)
 
@@ -200,7 +203,7 @@ add_executable(arpegio WIN32
     src/app/media_controls.cpp
     src/app/arpegio.rc
 )
-target_include_directories(arpegio PRIVATE src/app)
+target_include_directories(arpegio PRIVATE src/app ${CMAKE_CURRENT_BINARY_DIR}/app)
 target_include_directories(arpegio SYSTEM PRIVATE third_party/webview2/build/native/include)
 target_link_libraries(arpegio PRIVATE arpegio_app dwmapi shell32 shcore windowsapp
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/webview2/build/native/x64/WebView2LoaderStatic.lib)
@@ -244,3 +247,30 @@ add_executable(arpegio-tests
 target_include_directories(arpegio-tests SYSTEM PRIVATE ${TAGLIB_INCLUDE_DIRS})
 target_link_libraries(arpegio-tests PRIVATE arpegio_app tag FLAC)
 add_test(NAME arpegio-tests COMMAND arpegio-tests)
+
+# What the installer carries, with the licence each dependency asks to travel with the binary.
+install(TARGETS arpegio arpegio-cli RUNTIME DESTINATION .)
+install(DIRECTORY ui/ DESTINATION ui)
+install(FILES LICENSE README.md DESTINATION .)
+install(FILES third_party/README.md DESTINATION licenses)
+foreach(entry
+        "asiosdk/LICENSE.txt|asio-sdk.txt"
+        "flac/COPYING.Xiph|flac.txt"
+        "json/LICENSE.MIT|nlohmann-json.txt"
+        "minimp3/LICENSE|minimp3.txt"
+        "monkeysaudio/License.txt|monkeys-audio.txt"
+        "ogg/COPYING|ogg.txt"
+        "r8brain/LICENSE|r8brain.txt"
+        "soxr/LICENCE|soxr.txt"
+        "soxr/COPYING.LGPL|lgpl-2.1.txt"
+        "taglib/COPYING.MPL|taglib-mpl.txt"
+        "utfcpp/LICENSE|utfcpp.txt"
+        "vorbis/COPYING|vorbis.txt"
+        "wavpack/license.txt|wavpack.txt"
+        "webview2/LICENSE.txt|webview2.txt"
+        "webview2/NOTICE.txt|webview2-notice.txt")
+    string(REPLACE "|" ";" parts ${entry})
+    list(GET parts 0 source)
+    list(GET parts 1 target)
+    install(FILES third_party/${source} DESTINATION licenses RENAME ${target})
+endforeach()

@@ -1,3 +1,36 @@
+#include <winver.h>
+
 #include "resource.h"
+#include "version.h"
 
 IDI_ARPEGIO ICON "arpegio.ico"
+
+// Windows shows FileDescription beside the media controls and in the Task Manager.
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION ARPEGIO_VERSION_COMMA
+PRODUCTVERSION ARPEGIO_VERSION_COMMA
+FILEFLAGSMASK VS_FFI_FILEFLAGSMASK
+FILEFLAGS 0
+FILEOS VOS_NT_WINDOWS32
+FILETYPE VFT_APP
+FILESUBTYPE VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "0C0A04B0"
+        BEGIN
+            VALUE "CompanyName", "OrbitDR"
+            VALUE "FileDescription", "Arpegio"
+            VALUE "FileVersion", ARPEGIO_VERSION
+            VALUE "InternalName", "arpegio"
+            VALUE "LegalCopyright", "Software libre bajo licencia GPLv3"
+            VALUE "OriginalFilename", "arpegio.exe"
+            VALUE "ProductName", "Arpegio"
+            VALUE "ProductVersion", ARPEGIO_VERSION
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0C0A, 1200
+    END
+END
