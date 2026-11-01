@@ -1,6 +1,6 @@
 # Progreso de Arpegio
 
-Punto de partida para retomar el desarrollo. Última sesión: 2026-10-31. El diseño y las decisiones técnicas están en [DESIGN.md](DESIGN.md).
+Punto de partida para retomar el desarrollo. Última sesión: 2026-11-01. El diseño y las decisiones técnicas están en [DESIGN.md](DESIGN.md).
 
 ## Dónde estamos
 
@@ -103,7 +103,7 @@ Segunda tanda el mismo día, con Windows al 100 %. Las 14 pruebas sonaron bien, 
 
 Los detalles y cifras están en [DESIGN.md](DESIGN.md#verificación-hecha-el-2026-10-30).
 
-- 121 pruebas automáticas sin fallos, también en 12 ejecuciones seguidas con la CPU al 100 %. Diez fallos introducidos a propósito en el motor y cinco en la biblioteca fueron detectados.
+- 126 pruebas automáticas sin fallos. Las 121 anteriores pasaron también en 12 ejecuciones seguidas con la CPU al 100 %. Diez fallos introducidos a propósito en el motor, cinco en la biblioteca y doce en la detección de MQA y las secciones fueron detectados.
 - Aplicación real con la colección real y silencio digital: `tools\ui\run.ps1` hace más de 50 comprobaciones sobre la ventana, sin errores de consola. Ver [Interfaz](DESIGN.md#verificación-de-la-interfaz-2026-10-31).
 - `LOOPBACK` del MiniFuse: coincidencia total a 24 bits en 44.1, 96 y 192 kHz.
 - 11 FLAC reales coinciden con su MD5.
@@ -113,6 +113,9 @@ Los detalles y cifras están en [DESIGN.md](DESIGN.md#verificación-hecha-el-202
 - APE, WavPack PCM, M4A, MP3, DFF sin comprimir, WAV y FLAC reales abren y decodifican.
 - Biblioteca sobre la colección real: 5 184 pistas, 476 álbumes y 382 artistas. Las 5 184 pistas abren y se leen al principio, en medio y al final, también con las áreas multicanal de SACD. Reescanear sin cambios tarda 0.06 s y ningún archivo de la colección se modificó.
 - 954 pistas CUE empiezan en su muestra exacta en FLAC, WavPack, APE y DSF.
+- Detección de MQA sobre la colección real: los 1 022 archivos que marca el escáner son exactamente los que encuentra un análisis independiente de 30 s por pista, escrito aparte con libFLAC y sin usar el código de Arpegio. Ningún WAV, APE ni WavPack lo lleva. Esos 1 022 son 1 039 pistas contando las CUE, y en los 944 archivos que llevan etiqueta `ORIGINALSAMPLERATE` esa frecuencia coincide con la del audio.
+- Secciones sobre la colección real: los 476 álbumes están cada uno en una sola, con 80 en MQA, 31 en DSD, 304 en CD, 40 en PCM HighRes y 21 en Lossy. `tools\ui\steps_sections.mjs` las recorre en la ventana real, también con la ventana mínima y la cola abierta, sin errores de consola.
+- Actualización de un catálogo real de la versión 1, sobre una copia: 4 748 pistas se releen en 25 s, y quedan iguales ids, favoritos, listas, cola y fechas de alta. El escaneo siguiente vuelve a tardar 0.05 s. Un escaneo completo desde cero tarda 43 s.
 
 ## Implementado pero sin verificar
 
@@ -130,6 +133,8 @@ Los detalles y cifras están en [DESIGN.md](DESIGN.md#verificación-hecha-el-202
 - Calidad medida de r8brain en esta integración: solo corrió con silencio.
 - Vigilancia de carpetas sobre la colección real: solo se probó con carpetas temporales.
 - Hoja CUE en el bloque `CUESHEET` nativo de FLAC: solo se lee la etiqueta del mismo nombre.
+- Las comprobaciones completas de `tools\ui\run.ps1` no se repitieron tras añadir las secciones, porque reproducen por el DAC y pulsan teclas multimedia. Solo se ejecutó `steps_sections.mjs`.
+- MQA en ALAC: la colección no tiene ningún ALAC. El detector no depende del formato, pero solo se probó con FLAC reales y WAV sintéticos.
 
 ## Problema abierto
 
@@ -152,6 +157,9 @@ Una ejecución de `arpegio-library verify` sobre el catálogo multicanal se qued
 - Los `.bin` de imagen de CD no se decodifican. Hay dos hojas así en la colección y sus pistas sueltas entran por separado.
 - Las pistas sin etiquetas quedan como `Unknown Artist`: 93 en la colección. El nombre del archivo no se interpreta.
 - `Library::remove_folder` es asíncrono: volver a añadir la misma carpeta antes de que termine da error de solapamiento.
+- MQA se reconoce pero no se decodifica. Solo se busca en los primeros 4 s de cada archivo, así que uno que tuviera MQA únicamente más adelante, como un disco en un solo archivo con hoja CUE y una pista MQA en medio, no se marcaría.
+- Un álbum va a una sola sección: las pistas MQA de un álbum mayoritariamente CD solo se distinguen en su fila.
+- WMA cuenta siempre como Lossy, también WMA Lossless. No hay archivos así en la colección.
 
 ## Limitaciones actuales de la interfaz
 
@@ -185,7 +193,7 @@ Una ejecución de `arpegio-library verify` sobre el catálogo multicanal se qued
 | `src/engine/` | `render_plan` decide la ruta, `pipeline` convierte, `player` coordina |
 | `src/output/` | ASIO, WASAPI e hilo STA |
 | `src/formats/` | Lector DSF y escritor WAV |
-| `src/library/` | `library` coordina; `library_store` es el catálogo en SQLite; `scanner` lee las carpetas; `metadata`, `artwork` y `cue_sheet` son sus piezas; `track_source` conecta con el motor |
+| `src/library/` | `library` coordina; `library_store` es el catálogo en SQLite; `scanner` lee las carpetas; `metadata`, `mqa`, `artwork` y `cue_sheet` son sus piezas; `track_source` conecta con el motor |
 | `src/app/` | `controller` es la aplicación, sin ventanas y por tanto comprobable; `main_window` es la ventana con WebView2; `settings` son los ajustes |
 | `ui/` | La página, en JavaScript sin dependencias. `store` guarda el estado, `router` las vistas, `views/` cada vista y `signal` la ruta de la señal |
 | `cli/` | `arpegio-cli` y `arpegio-dsd2wav` |

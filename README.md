@@ -17,6 +17,8 @@ scripts\build.bat release test
 
 La aplicación es `build\release\arpegio.exe`. Guarda su catálogo y sus ajustes en `%LOCALAPPDATA%\Arpegio`, y solo lee la música.
 
+Junto al buscador están las secciones por tipo de archivo: MQA, DSD, CD, PCM HighRes y Lossy. MQA solo se reconoce: Arpegio no lo decodifica.
+
 En Ajustes se elige la salida. Por defecto usa WASAPI compartido, que no es bit-perfect. No hay volumen por software, así que el volumen se ajusta en el DAC, y con WASAPI conviene tener el de Windows al 100 %.
 
 | Teclas | Acción |

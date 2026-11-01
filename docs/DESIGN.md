@@ -67,7 +67,7 @@ El volumen de hardware del endpoint llega a las muestras incluso en modo exclusi
 
 DST es un port de `dstdec.c` de FFmpeg. FFmpeg no se usa como dependencia: la versión estable 9.0.2 no entrega DSD crudo desde DST.
 
-MQA queda fuera porque es propietario y requiere licencia.
+Decodificar MQA queda fuera porque es propietario y requiere licencia. Esos archivos suenan como el PCM que son, sin desplegarse. Arpegio solo los reconoce, para clasificarlos: ver [Biblioteca](#biblioteca).
 
 Un archivo se identifica por su contenido antes que por su extensión. Dos casos reales de la colección obligan a mirar más allá del byte 0:
 
@@ -91,6 +91,8 @@ FolderWatcher ──> Library ──> hilo de escaneo ──> scan_folder ──
 - **Identidad de pista: carpeta, ruta y parte.** La parte es 0 para un archivo entero, y el número de pista para CUE y SACD. Así una pista conserva su id, y con él favoritos y listas, al reescanear.
 - **Identidad de álbum: título y carpeta.** Ni el año ni el artista sirven: varían entre las pistas de un recopilatorio, y un artista puede tener varios discos homónimos. Las subcarpetas `CD1`, `Disc 2` y similares cuentan como su carpeta padre. Dos ediciones de un disco en carpetas distintas son dos álbumes.
 - **Crédito del álbum: mayoría.** Es el artista que las etiquetas nombran en más de la mitad de las pistas; si ninguno llega, `Various Artists`. El año es el más reciente de sus pistas. La portada, la de la primera pista que tenga.
+- **Secciones por tipo de archivo.** Cada álbum está en una sola, la de la mayoría de sus pistas, igual que el crédito, y un empate va a la primera de este orden: MQA, DSD, PCM HighRes, CD, Lossy. Una pista es Lossy por su códec, DSD por su formato y MQA por su audio; PCM HighRes tiene más de 16 bits o más de 48 kHz, y lo demás es CD. Así 16 bits a 48 kHz cuenta como CD, porque ningún álbum debe quedar sin sección. Se calcula al consultar, de modo que no hay nada que mantener al cambiar una pista.
+- **MQA se reconoce en el audio, no en las etiquetas.** Muchos archivos MQA no llevan etiquetas, y una etiqueta sobrevive aunque el audio ya esté decodificado. La palabra de sincronía de 36 bits va en el XOR de los dos canales, a partir del bit 16 contando desde arriba. `has_mqa_sync` lee 4 s en PCM estéreo de 16 y 24 bits, porque los archivos reales la muestran en el primer medio segundo y luego más de una vez por segundo. Exige dos apariciones: una sola puede darse por azar. Sigue el método público de MQA_identifier, y no contiene nada del decodificador.
 - **Rangos CUE en unidades del decodificador.** Frames, o bytes por canal en DSD. `make_range_decoder` presenta el trozo como una fuente más, y dos pistas contiguas del mismo formato siguen en el mismo anillo sin hueco.
 - **Hojas CUE tolerantes.** El nombre de `FILE` puede ser el `.wav` original aunque el archivo sea ya `.flac`, o el temporal del ripeador. Si dos hojas cubren un audio, gana la primera por ruta. También se lee la hoja incrustada en la etiqueta `CUESHEET`. Se aceptan tiempos con más de 74 frames, porque rechazar la hoja deja el álbum como una sola pista.
 - **SACD.** Una pista por entrada de la tabla de contenidos. Se cataloga el área estéreo salvo que `ScanOptions::sacd_multichannel` pida la multicanal. Un `.iso` que no sea SACD se ignora.
@@ -118,6 +120,7 @@ Página (ui/) <── JSON ──> MainWindow (WebView2) <──> Controller ─
 - **Los saltos no reabren el dispositivo.** `play`, `next`, `previous` y `seek` vacían el anillo y siguen en el mismo flujo si el formato coincide. Un DAC no tiene que volver a sincronizarse, y el salto tarda unos 200 ms.
 - **El anillo va por delante de lo que se oye.** A 44.1 kHz son hasta 90 s. Por eso `Player` distingue la pista que se decodifica de la que se oye: `seek` actúa sobre la segunda, y una edición de la cola que afecte a lo ya decodificado rellena el anillo desde la posición actual.
 - **Nombres en español solo al mostrar.** El catálogo guarda `Various Artists`, y `Controller` lo traduce al enviarlo a la página.
+- **Las secciones son una ruta, no un estado.** Junto al buscador, cada botón abre `{ view: 'albums', section }`, y la propia vista filtra la lista de álbumes. Atrás, adelante y la posición de desplazamiento funcionan sin código propio. Si no caben, los botones bajan a una segunda línea en vez de ocultarse: con la ventana mínima y la cola abierta quedan unos 400 px.
 
 ## Verificación de la interfaz, 2026-10-31
 
