@@ -143,6 +143,8 @@ El nivel coincide hasta donde se puede medir desde el equipo. La ganancia ajusta
 
 Audirvana tampoco actúa sobre el Topping por otras vías. En ASIO pregunta por la ganancia de salida con `kAsioCanOutputGain`, el driver responde `ASE_NotPresent` y no llega a pedirla. Su código HID solo busca DAC MQA: abre colecciones con página de uso `0xFF00` y *feature reports* de 65 bytes, y compara la respuesta con `MQADecoder` y `MQARenderer`. El Topping declara las páginas `0x0001` y `0x000C`, sin *feature reports*, así que no pasa ese filtro. Lo de HID se leyó en el binario de la versión 3.4.0, no se observó en ejecución.
 
+Los dos usan el mismo driver, pero no el SDK de Steinberg de la misma forma. Arpegio solo incluye sus cabeceras, de la versión 2.3.4, y tiene su propia carga de drivers. Audirvana compiló además `asio.cpp` y `asiolist.cpp`, y por eso contiene sus textos, que no están en `arpegio.exe`; su versión exacta no se puede saber. Eso no afecta al audio: `asio.cpp` solo reenvía llamadas al driver y no toca los buffers, y los dos crean el driver con la misma llamada a `CoCreateInstance`. Las muestras las escribe cada programa directamente en la memoria del driver, que es donde se capturaron.
+
 El comparador no es indulgente: sobre copias alteradas de una captura real detecta un solo sample cambiado en 1 unidad de 32 bits, −0.01 dB de ganancia, dither a 24 bits, canales cruzados y polaridad invertida.
 
 Lo que esto no cubre:
