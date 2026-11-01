@@ -1,13 +1,9 @@
 // The path the sound takes, stage by stage, in the terms an audio enthusiast expects to check.
 import { h, icon } from './dom.js';
 import { dsdName, formatLine, kilohertz } from './format.js';
-import { state } from './store.js';
+import { selectedDevice } from './store.js';
 
 const KIND_NAMES = { asio: 'ASIO', exclusive: 'WASAPI exclusivo', shared: 'WASAPI compartido' };
-
-function selectedDevice() {
-  return state.devices.list.find((device) => device.key === state.devices.selected);
-}
 
 function processingLines(plan, track) {
   switch (plan.path) {

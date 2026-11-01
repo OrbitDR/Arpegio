@@ -129,7 +129,7 @@ export default async function run(page, { sleep }) {
   check(true, 'the repeat button cycles through its modes');
 
   // Queue panel.
-  await page.click('.bar-right .icon-button');
+  await page.click('.bar-right .icon-button:last-child');
   await sleep(400);
   check((await count('.queue-row')) === 4, 'the queue panel lists the tracks');
   check((await text('.queue-row.current .queue-title')) === (await queue()).tracks[(await status()).index].title, 'and marks the current one');
@@ -150,7 +150,7 @@ export default async function run(page, { sleep }) {
   await page.click('.queue-row:first-child .queue-remove');
   await until(`queue.tracks.length === 3`);
   check((await count('.queue-row')) === 3, 'removing from the queue updates the panel');
-  await page.click('.bar-right .icon-button');
+  await page.click('.bar-right .icon-button:last-child');
 
   // Favourites and context menu.
   const favorites = await page.call('library.favorites');

@@ -46,6 +46,10 @@ export function currentTrack() {
   return status ? queue.tracks[status.index] ?? null : null;
 }
 
+export function selectedDevice() {
+  return state.devices.list.find((device) => device.key === state.devices.selected);
+}
+
 export async function connect() {
   listen('status', (status) => set('status', status));
   listen('queue', (queue) => {

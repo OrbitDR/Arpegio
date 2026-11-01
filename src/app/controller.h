@@ -82,6 +82,7 @@ private:
     void adopt_devices(std::vector<DeviceInfo> devices);
     const DeviceInfo* selected_device() const;
     void apply_output();
+    void release_device();
     DeviceSettings& settings_for(const std::string& key);
     nlohmann::json devices_json();
     void configure_device(const std::string& key, const nlohmann::json& changes);

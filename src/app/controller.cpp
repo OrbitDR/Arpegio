@@ -463,6 +463,11 @@ void Controller::register_handlers() {
              configure_device(params.at("key").get<std::string>(), params.at("settings"));
              return json{};
          }},
+        {"devices.release",
+         [this](const json&) {
+             release_device();
+             return json{};
+         }},
     };
 }
 
@@ -669,6 +674,17 @@ void Controller::apply_output() {
     }
 }
 
+// Closes the stream so other programs can open the device. Only play takes it back, from the same place.
+void Controller::release_device() {
+    const PlayerStatus status = player_.status();
+    if (status.state == PlayerState::Stopped) return;
+    player_.stop();
+    player_.wait_until_stopped(5000);
+    resume_index_ = status.queue_index;
+    resume_position_ = status.position_seconds;
+    was_active_ = false;  // otherwise tick() takes this stop for the end of the queue
+}
+
 void Controller::configure_device(const std::string& key, const json& changes) {
     DeviceSettings& device = settings_for(key);
     const DeviceSettings before = device;
@@ -711,6 +727,7 @@ json Controller::devices_json() {
 json Controller::status_json(const PlayerStatus& status) const {
     const bool stopped = status.state == PlayerState::Stopped;
     const size_t index = stopped ? resume_index_ : status.queue_index;
+    const DeviceInfo* device = selected_device();
     json out = {{"state", state_name(status.state)},
                 {"index", index},
                 {"trackId", index < queue_.size() ? queue_[index].id : 0},
@@ -719,6 +736,8 @@ json Controller::status_json(const PlayerStatus& status) const {
                              : index < queue_.size() && queue_[index].format.rate ? queue_[index].format.seconds() : 0.0},
                 {"repeat", settings_.repeat},
                 {"bitPerfect", status.bit_perfect},
+                // A shared stream keeps nobody out, so there is nothing to release.
+                {"deviceHeld", status.stream_open && device && device->kind != OutputKind::WasapiShared},
                 {"windowsGainDb", status.hardware_gain_db},
                 {"buffer", status.ring_capacity ? static_cast<double>(status.buffered_bytes) / status.ring_capacity : 0.0},
                 {"underruns", status.underruns},

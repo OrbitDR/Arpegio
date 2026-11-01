@@ -6,11 +6,14 @@ import { reportError } from './feedback.js';
 import { shortFormat, time } from './format.js';
 import { cover } from './parts.js';
 import { currentRoute, go } from './router.js';
-import { currentTrack, set, state, watch } from './store.js';
+import { currentTrack, selectedDevice, set, state, watch } from './store.js';
 
 const SEEK_HOLD_MS = 900;  // lets the engine land before the bar follows it again
 const REPEAT_ORDER = ['off', 'queue', 'track'];
 const REPEAT_LABELS = { off: 'Repetir: desactivado', queue: 'Repetir: cola', track: 'Repetir: pista' };
+const DEVICE_HELD = 'Liberar el dispositivo. Se detiene la música y Reproducir continúa desde aquí';
+const DEVICE_FREE = 'Dispositivo libre. Se ocupa al reproducir';
+const DEVICE_SHARED = 'Modo compartido: el dispositivo sigue disponible para los demás programas';
 
 const send = (method, params) => call(method, params).catch(reportError);
 
@@ -71,6 +74,7 @@ export function createPlayerBar() {
   });
 
   const quality = h('button.bar-quality', { type: 'button', title: 'Ver la ruta de la señal', onclick: () => go({ view: 'now' }) });
+  const device = iconButton('device', DEVICE_FREE, () => send('devices.release'), { cls: 'bar-device' });
   const queueButton = iconButton('playlist', 'Cola de reproducción', () => set('queueOpen', !state.queueOpen));
 
   const bar = h('footer.player-bar',
@@ -78,7 +82,7 @@ export function createPlayerBar() {
     h('div.bar-center',
       h('div.bar-buttons', shuffle, previous, toggle, next, repeat),
       h('div.bar-seek', elapsed, seek, remaining)),
-    h('div.bar-right', quality, queueButton));
+    h('div.bar-right', quality, device, queueButton));
 
   function paintSeek() {
     const max = Number(seek.max) || 1;
@@ -133,9 +137,15 @@ export function createPlayerBar() {
         }
       }
     }
+
+    device.disabled = !status.deviceHeld;
+    device.classList.toggle('on', status.deviceHeld);
+    device.title = status.deviceHeld ? DEVICE_HELD : selectedDevice()?.kind === 'shared' ? DEVICE_SHARED : DEVICE_FREE;
+    device.ariaLabel = device.title;
   }
 
   watch('status', update);
+  watch('devices', update);
   watch('queue', () => {
     shownTrack = undefined;
     update();

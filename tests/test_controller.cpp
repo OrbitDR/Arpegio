@@ -25,13 +25,15 @@ namespace {
 // Takes samples as fast as it can. Nothing here touches a real device.
 class SilentOutput final : public Output {
 public:
-    explicit SilentOutput(std::atomic<int>* opened) : opened_(opened) {}
+    SilentOutput(std::atomic<int>* opened, std::atomic<int>* held) : opened_(opened), held_(held) {}
     ~SilentOutput() override { close(); }
 
     DeviceFormat open(const DeviceFormat& requested, FrameSource& source) override {
         format_ = requested;
         source_ = &source;
         ++*opened_;
+        ++*held_;
+        open_ = true;
         return requested;
     }
 
@@ -52,13 +54,19 @@ public:
         if (thread_.joinable()) thread_.join();
     }
 
-    void close() override { stop(); }
+    void close() override {
+        stop();
+        if (open_) --*held_;
+        open_ = false;
+    }
     bool needs_reopen() const override { return false; }
     std::string fault() const override { return {}; }
     OutputStats stats() const override { return {}; }
 
 private:
     std::atomic<int>* opened_;
+    std::atomic<int>* held_;
+    bool open_ = false;
     DeviceFormat format_{};
     FrameSource* source_ = nullptr;
     std::atomic<bool> running_{false};
@@ -104,6 +112,7 @@ struct Harness {
     std::filesystem::path data;
     std::filesystem::path music;
     std::atomic<int> opened{0};
+    std::atomic<int> held{0};  // streams open right now
     std::map<std::string, json> last_event;
     std::vector<std::string> events;
     std::unique_ptr<Controller> controller;
@@ -134,7 +143,7 @@ struct Harness {
             last_event[event] = payload;
         };
         options.output_factory = [this](const DeviceInfo&, const OutputOptions&) -> std::unique_ptr<Output> {
-            return std::make_unique<SilentOutput>(&opened);
+            return std::make_unique<SilentOutput>(&opened, &held);
         };
         options.list_devices = [] {
             return std::vector<DeviceInfo>{
@@ -462,6 +471,99 @@ TEST(controller_changing_the_output_settings_restarts_the_stream_where_it_was) {
     h.call("devices.configure", {{"key", "shared:{speakers}"}, {"settings", {{"periodMs", 20}}}});
     Sleep(30);
     CHECK(h.opened == 2);
+}
+
+TEST(controller_release_frees_the_device_and_play_takes_it_back_from_the_same_place) {
+    Harness h;
+    const auto ids = h.library_with_lengths({120.0, 150.0});
+    h.call("devices.select", {{"key", "exclusive:{speakers}"}});
+    h.call("queue.play", {{"tracks", ids}, {"index", 1}});
+    CHECK(h.until([&] { return h.sounding(150.0); }));
+    CHECK(h.status().at("deviceHeld") == true);
+    h.call("player.toggle");
+    CHECK(h.until_state("paused"));
+    CHECK(h.status().at("deviceHeld") == true);  // a pause keeps the stream, so nobody else can get in
+    CHECK(h.held == 1);
+    const double position = h.status().at("position");
+
+    h.call("devices.release");
+    CHECK(h.held == 0);
+    json status = h.status();
+    CHECK(status.at("state") == "stopped");
+    CHECK(status.at("deviceHeld") == false);
+    CHECK(status.at("plan").is_null());
+    CHECK(status.at("index") == 1);
+    CHECK_NEAR(status.at("position").get<double>(), position, 0.01);
+
+    // Nothing takes the device back by itself, and neither ticks nor a second press lose the place.
+    Sleep(30);
+    for (int i = 0; i < 5; ++i) h.controller->tick();
+    h.call("devices.release");
+    status = h.status();
+    CHECK(h.opened == 1);
+    CHECK(h.held == 0);
+    CHECK(status.at("index") == 1);
+    CHECK_NEAR(status.at("position").get<double>(), position, 0.01);
+
+    h.call("player.toggle");
+    CHECK(h.until_state("playing"));
+    CHECK(h.until([&] { return h.status().at("deviceHeld") == true; }));
+    CHECK(h.opened == 2);
+    CHECK(h.held == 1);
+    CHECK(h.status().at("index") == 1);
+    CHECK(h.status().at("position").get<double>() >= position);
+}
+
+TEST(controller_release_stops_what_is_playing) {
+    Harness h;
+    const auto ids = h.library_with_lengths({120.0, 150.0});
+    h.call("devices.select", {{"key", "asio:{asio}"}});
+    h.call("queue.play", {{"tracks", ids}, {"index", 1}});
+    CHECK(h.until([&] { return h.sounding(150.0); }));
+
+    h.call("devices.release");
+    CHECK(h.held == 0);
+    const json status = h.status();
+    CHECK(status.at("state") == "stopped");
+    CHECK(status.at("index") == 1);
+    CHECK(status.at("position").get<double>() > 0.0);
+}
+
+TEST(controller_release_stays_on_the_track_being_heard) {
+    Harness h;
+    const auto ids = h.library_with_lengths({30.0, 120.0});
+    h.call("devices.select", {{"key", "asio:{asio}"}});
+    h.call("queue.play", {{"tracks", ids}});
+    CHECK(h.until([&] { return h.sounding(30.0); }));
+    h.call("player.toggle");
+    CHECK(h.until_state("paused"));
+    Sleep(50);  // the first track fits in the ring, so the loader is on the second by now
+    const double position = h.status().at("position");
+
+    h.call("devices.release");
+    const json status = h.status();
+    CHECK(status.at("index") == 0);
+    CHECK_NEAR(status.at("position").get<double>(), position, 0.01);
+}
+
+TEST(controller_a_shared_stream_does_not_hold_the_device) {
+    Harness h;
+    const auto ids = h.library_with_tracks(120.0);
+    h.call("queue.play", {{"tracks", ids}});
+    CHECK(h.until([&] { return !h.status().at("plan").is_null(); }));
+    CHECK(h.held == 1);
+    CHECK(h.status().at("deviceHeld") == false);
+}
+
+TEST(controller_the_end_of_the_queue_goes_back_to_the_start) {
+    Harness h;
+    const auto ids = h.library_with_tracks(0.5);
+    h.call("queue.play", {{"tracks", ids}, {"index", 2}});
+    CHECK(h.until_state("playing"));
+    CHECK(h.until_state("stopped"));
+    const json status = h.status();
+    CHECK(status.at("index") == 0);
+    CHECK(status.at("position") == 0.0);
 }
 
 TEST(controller_does_not_probe_devices_during_playback) {
