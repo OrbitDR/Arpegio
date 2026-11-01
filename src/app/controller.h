@@ -98,10 +98,13 @@ private:
     void adopt_devices(std::vector<DeviceInfo> devices);
     const DeviceInfo* selected_device() const;
     void apply_output();
+    OutputOptions output_options(const DeviceSettings& device) const;
     void apply_volume();
     void set_volume(double db);
     void set_replay_gain(const std::string& mode);
     void release_device();
+    void start_dop_test(const std::string& key);
+    nlohmann::json dop_test_json() const;
     DeviceSettings& settings_for(const std::string& key);
     nlohmann::json devices_json();
     void configure_device(const std::string& key, const nlohmann::json& changes);
@@ -116,7 +119,9 @@ private:
     ListDevices list_devices_;
     Settings settings_;
     std::unique_ptr<Library> library_;
+    OutputFactory output_factory_;
     Player player_;
+    std::unique_ptr<Player> dop_test_;  // a player of its own, so the queue and the place in it stay as they were
     std::unordered_map<std::string, Handler> handlers_;
 
     std::vector<Track> queue_;

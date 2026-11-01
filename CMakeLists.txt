@@ -122,6 +122,7 @@ add_library(arpegio_core STATIC
     src/audio/quantizer.cpp
     src/audio/volume.cpp
     src/decode/decoder.cpp
+    src/decode/dsd_silence.cpp
     src/decode/dsf_decoder.cpp
     src/decode/dff_decoder.cpp
     src/decode/framed_dsd.cpp

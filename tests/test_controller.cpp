@@ -150,8 +150,10 @@ struct Harness {
             return std::make_unique<SilentOutput>(&opened, &held);
         };
         options.list_devices = [] {
+            DeviceInfo asio = fake_device(OutputKind::Asio, L"{asio}", "asio device");
+            asio.pcm_modes.push_back({176400, WireEncoding::S32, 32});
             return std::vector<DeviceInfo>{
-                fake_device(OutputKind::Asio, L"{asio}", "asio device"),
+                asio,
                 fake_device(OutputKind::WasapiExclusive, L"{speakers}", "speakers"),
                 fake_device(OutputKind::WasapiShared, L"{other}", "other"),
                 fake_device(OutputKind::WasapiShared, L"{speakers}", "speakers", true),
@@ -773,6 +775,95 @@ TEST(controller_applies_replay_gain_from_the_first_play_of_a_stopped_queue) {
     const std::vector<int64_t> ids{h.call("library.tracks").at(0).at("id").get<int64_t>()};
     h.call("queue.play", {{"tracks", ids}});
     CHECK(h.until([&] { return std::abs(h.status().at("trackGainDb").get<double>() + 3.0) < 1e-6; }));
+}
+
+TEST(controller_dop_test_sends_dop_and_records_the_answer) {
+    Harness h;
+    h.open();
+    CHECK(h.devices_ready());
+    const json before = h.call("devices.startDopTest", {{"key", "asio:{asio}"}});
+    CHECK(before.at("running").get<bool>());
+    CHECK(h.until([&] { return h.call("devices.dopTestStatus").at("sending").get<bool>(); }));
+    const json test = h.call("devices.dopTestStatus");
+    CHECK(test.at("rate") == 176400);
+    CHECK(test.at("error") == "");
+    CHECK(h.held == 1);
+
+    h.call("devices.stopDopTest", {{"key", "asio:{asio}"}, {"confirmed", true}});
+    CHECK(h.held == 0);
+    CHECK(!h.call("devices.dopTestStatus").at("running").get<bool>());
+    const json devices = h.call("devices.list");
+    bool confirmed = false;
+    for (const json& device : devices.at("list")) {
+        if (device.at("key") == "asio:{asio}") confirmed = device.at("settings").at("dopConfirmed");
+    }
+    CHECK(confirmed);
+}
+
+TEST(controller_dop_test_leaves_the_setting_alone_when_cancelled) {
+    Harness h;
+    h.open();
+    CHECK(h.devices_ready());
+    h.call("devices.configure", {{"key", "asio:{asio}"}, {"settings", {{"dopConfirmed", true}}}});
+    h.call("devices.startDopTest", {{"key", "asio:{asio}"}});
+    h.call("devices.stopDopTest", {{"key", "asio:{asio}"}});
+    const json devices = h.call("devices.list");
+    for (const json& device : devices.at("list")) {
+        if (device.at("key") == "asio:{asio}") CHECK(device.at("settings").at("dopConfirmed").get<bool>());
+    }
+}
+
+TEST(controller_dop_test_keeps_the_music_where_it_was) {
+    Harness h;
+    const std::vector<int64_t> ids = h.library_with_tracks();
+    h.call("devices.select", {{"key", "asio:{asio}"}});
+    h.call("queue.play", {{"tracks", ids}, {"index", 1}, {"start", 12.0}});
+    CHECK(h.until([&] { return h.status().at("position").get<double>() > 12.0; }));
+
+    h.call("devices.startDopTest", {{"key", "asio:{asio}"}});
+    CHECK(h.until([&] { return h.call("devices.dopTestStatus").at("sending").get<bool>(); }));
+    CHECK(h.held == 1);  // the music gave the device up
+    const json waiting = h.status();
+    CHECK(waiting.at("state") == "stopped");
+    CHECK(waiting.at("index") == 1);
+    CHECK(waiting.at("position").get<double>() >= 12.0);
+    CHECK(waiting.at("position").get<double>() < 29.0);
+
+    h.call("devices.stopDopTest", {{"key", "asio:{asio}"}});
+    const double position = waiting.at("position");
+    h.call("player.toggle");
+    CHECK(h.until([&] { return h.status().at("state") == "playing"; }));
+    const json resumed = h.status();
+    CHECK(resumed.at("index") == 1);
+    CHECK(resumed.at("position").get<double>() >= position);
+}
+
+TEST(controller_music_ends_the_dop_test) {
+    Harness h;
+    const std::vector<int64_t> ids = h.library_with_tracks();
+    h.call("devices.select", {{"key", "asio:{asio}"}});
+    h.call("devices.startDopTest", {{"key", "asio:{asio}"}});
+    CHECK(h.until([&] { return h.call("devices.dopTestStatus").at("sending").get<bool>(); }));
+    h.call("queue.play", {{"tracks", ids}});
+    CHECK(!h.call("devices.dopTestStatus").at("running").get<bool>());
+    CHECK(h.until([&] { return h.status().at("state") == "playing" && h.held == 1; }));
+}
+
+TEST(controller_dop_test_explains_what_cannot_work) {
+    Harness h;
+    h.open();
+    CHECK(h.devices_ready());
+    const auto refused = [&](const char* key, const char* text) {
+        try {
+            h.call("devices.startDopTest", {{"key", key}});
+        } catch (const std::runtime_error& error) {
+            return std::string(error.what()).find(text) != std::string::npos;
+        }
+        return false;
+    };
+    CHECK(refused("shared:{speakers}", "exclusivo"));
+    CHECK(refused("exclusive:{speakers}", "176.4"));  // this one stops at 96 kHz
+    CHECK(refused("asio:{gone}", "disponible"));
 }
 
 TEST(settings_round_trip) {

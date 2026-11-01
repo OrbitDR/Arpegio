@@ -8,6 +8,9 @@
 #include <thread>
 #include <vector>
 
+#include "decode/dsd_silence.h"
+#include "dsd/dop.h"
+#include "dsd/dsd_fir.h"
 #include "engine/player.h"
 #include "test_support.h"
 
@@ -824,6 +827,29 @@ private:
 };
 
 }  // namespace
+
+TEST(dsd_silence_goes_out_as_dop_with_nothing_but_the_silence_pattern) {
+    Fixture f;
+    PlaybackPolicy policy;
+    policy.dsd = DsdPolicy::Dop;
+    f.player.set_policy(policy);
+    QueueItem item;
+    item.open = [] { return make_dsd_silence(2822400, 2, 1.0); };
+    f.player.set_queue({item});
+    f.player.play();
+    CHECK(f.player.wait_until_stopped(30000));
+    CHECK(f.player.status().error.empty());
+
+    // 32-bit little endian words: an empty byte, two of DSD, and the marker on top.
+    const auto& bytes = *f.capture;
+    CHECK(bytes.size() >= 176400u * 8);
+    bool clean = true;
+    for (size_t at = 0; at + 4 <= bytes.size() && clean; at += 4) {
+        const bool marker = bytes[at + 3] == kDopMarkerA || bytes[at + 3] == kDopMarkerB;
+        clean = marker && bytes[at] == 0 && bytes[at + 1] == kDsdSilenceByte && bytes[at + 2] == kDsdSilenceByte;
+    }
+    CHECK(clean);
+}
 
 TEST(a_gain_rewrites_the_samples_with_dither) {
     Fixture f;

@@ -9,6 +9,7 @@
 #include <random>
 #include <stdexcept>
 
+#include "decode/dsd_silence.h"
 #include "library/paths.h"
 #include "library/track_source.h"
 
@@ -20,6 +21,11 @@ namespace {
 
 constexpr double kMinVolumeDb = -60.0;  // the bottom of the slider, which is silence
 constexpr int kVolumeSaveTicks = 5;
+
+// DSD64 in both families, which carry DoP at 176.4 and 192 kHz. Every DAC that takes DoP at all takes one.
+constexpr uint32_t kDopTestRates[] = {2822400, 3072000};
+constexpr uint32_t kDopRateDivider = 16;
+constexpr double kDopTestSeconds = 600.0;  // far longer than anyone takes to look at a DAC
 
 double volume_gain(double db) {
     return db <= kMinVolumeDb ? 0.0 : std::pow(10.0, db / 20.0);
@@ -193,7 +199,8 @@ Controller::Controller(Options options)
       emit_(std::move(options.emit)),
       list_devices_(options.list_devices ? std::move(options.list_devices) : list_real_devices),
       settings_(load_settings(settings_file_)),
-      player_(std::move(options.output_factory)) {
+      output_factory_(std::move(options.output_factory)),
+      player_(output_factory_) {
     ScanOptions scan;
     scan.sacd_multichannel = settings_.sacd_multichannel;
     library_ = std::make_unique<Library>(options.data_folder / "library.db", options.data_folder / "cache", scan,
@@ -505,6 +512,20 @@ void Controller::register_handlers() {
              release_device();
              return json{};
          }},
+        {"devices.startDopTest",
+         [this](const json& params) {
+             start_dop_test(params.at("key").get<std::string>());
+             return dop_test_json();
+         }},
+        {"devices.dopTestStatus", [this](const json&) { return dop_test_json(); }},
+        {"devices.stopDopTest",
+         [this](const json& params) {
+             dop_test_.reset();
+             if (params.contains("confirmed")) {
+                 configure_device(params.at("key").get<std::string>(), {{"dopConfirmed", params.at("confirmed")}});
+             }
+             return json{};
+         }},
     };
 }
 
@@ -569,6 +590,7 @@ void Controller::start(size_t index, double seconds) {
         return;
     }
     if (!selected_device()) throw std::runtime_error("no hay ningún dispositivo de salida disponible");
+    dop_test_.reset();  // music always wins, as with a media key pressed during the check
     player_.play(index, seconds);
 }
 
@@ -688,10 +710,7 @@ void Controller::apply_output() {
     if (!device) return;
 
     const DeviceSettings& chosen = settings_for(settings_.device);
-    OutputOptions options;
-    options.first_channel = chosen.first_channel;
-    options.period_ms = chosen.period_ms;
-    options.buffer_frames = chosen.buffer_frames;
+    const OutputOptions options = output_options(chosen);
     PlaybackPolicy policy;
     policy.dsd = dsd_policy(chosen.dsd);
     policy.dop_confirmed = chosen.dop_confirmed;
@@ -711,6 +730,14 @@ void Controller::apply_output() {
         player_.play(status.queue_index, status.position_seconds);
         player_.set_paused(status.state == PlayerState::Paused);
     }
+}
+
+OutputOptions Controller::output_options(const DeviceSettings& device) const {
+    OutputOptions options;
+    options.first_channel = device.first_channel;
+    options.period_ms = device.period_ms;
+    options.buffer_frames = device.buffer_frames;
+    return options;
 }
 
 void Controller::apply_volume() {
@@ -753,6 +780,47 @@ void Controller::release_device() {
     resume_index_ = status.queue_index;
     resume_position_ = status.position_seconds;
     was_active_ = false;  // otherwise tick() takes this stop for the end of the queue
+}
+
+// Silence, so that a DAC reading this as PCM plays nothing but the markers, the low noise the page warns about.
+void Controller::start_dop_test(const std::string& key) {
+    const auto device = std::find_if(devices_.begin(), devices_.end(),
+                                     [&key](const DeviceInfo& candidate) { return device_key(candidate) == key; });
+    if (device == devices_.end()) throw std::runtime_error("ese dispositivo ya no está disponible");
+    if (device->kind == OutputKind::WasapiShared) throw std::runtime_error("DoP necesita ASIO o WASAPI exclusivo");
+
+    uint32_t rate = 0;
+    for (const uint32_t candidate : kDopTestRates) {
+        const bool available = std::any_of(device->pcm_modes.begin(), device->pcm_modes.end(), [&](const PcmMode& mode) {
+            return mode.rate == candidate / kDopRateDivider &&
+                   (mode.encoding == WireEncoding::S32 || mode.encoding == WireEncoding::S24);
+        });
+        if (available && rate == 0) rate = candidate;
+    }
+    if (rate == 0) throw std::runtime_error("este dispositivo no tiene las frecuencias que DoP necesita: 176.4 o 192 kHz");
+
+    release_device();
+    dop_test_.reset();
+    PlaybackPolicy policy;
+    policy.dsd = DsdPolicy::Dop;
+    QueueItem silence;
+    silence.open = [rate] { return make_dsd_silence(rate, 2, kDopTestSeconds); };
+    dop_test_ = std::make_unique<Player>(output_factory_);
+    dop_test_->set_device(*device, output_options(settings_for(key)));
+    dop_test_->set_policy(policy);
+    dop_test_->set_queue({std::move(silence)});
+    dop_test_->play();
+}
+
+json Controller::dop_test_json() const {
+    if (!dop_test_) return {{"running", false}};
+    const PlayerStatus status = dop_test_->status();
+    return {{"running", status.state != PlayerState::Stopped},
+            {"sending", status.stream_open && status.plan.path == RenderPath::DsdDop},
+            {"rate", status.stream_open ? status.plan.device.rate : 0},
+            {"encoding", status.stream_open ? wire_name(status.plan.device.encoding) : ""},
+            {"windowsGainDb", status.hardware_gain_db},
+            {"error", status.error}};
 }
 
 void Controller::configure_device(const std::string& key, const json& changes) {

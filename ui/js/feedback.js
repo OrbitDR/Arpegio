@@ -5,6 +5,39 @@ const TOAST_MS = 6000;
 let toasts;
 let openMenu = null;
 
+// A dialog whose text and buttons can change while it is open. `actions` is a list of
+// { label, primary, onclick }. Returns { update(title, text, actions), close() }.
+export function openDialog({ title, text, actions, onclose }) {
+  const heading = h('h2');
+  const body = h('div.dialog-text');
+  const buttons = h('div.dialog-actions');
+  const close = () => {
+    overlay.remove();
+    document.removeEventListener('keydown', onkey, true);
+  };
+  const dismiss = () => {
+    close();
+    onclose?.();
+  };
+  const update = (nextTitle, nextText, nextActions) => {
+    heading.textContent = nextTitle;
+    body.replaceChildren(...[nextText].flat().map((line) => h('p', line)));
+    buttons.replaceChildren(...nextActions.map(({ label, primary, onclick }) => h('button.button', {
+      type: 'button',
+      class: primary ? 'primary' : '',
+      onclick,
+    }, label)));
+  };
+  const onkey = (event) => {
+    if (event.key === 'Escape') dismiss();
+  };
+  const overlay = h('div.overlay', h('div.dialog', { role: 'dialog', ariaModal: 'true' }, heading, body, buttons));
+  update(title, text, actions);
+  document.addEventListener('keydown', onkey, true);
+  document.body.append(overlay);
+  return { update, close, dismiss };
+}
+
 export function initFeedback(root) {
   toasts = h('div.toasts', { role: 'status' });
   root.append(toasts);

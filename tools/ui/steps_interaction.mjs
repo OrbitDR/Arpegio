@@ -224,7 +224,7 @@ public static class Dlg {
 '@
 [Dlg]::Close(${process.env.ARPEGIO_PID ?? 0})`;
   const pid = execFileSync('powershell', ['-NoProfile', '-Command',
-    `(Get-Process arpegio | Where-Object { $_.Path -like '*build*release*' } | Select-Object -First 1).Id`], { encoding: 'utf8' }).trim();
+    `(Get-Process arpegio | Where-Object { $_.Path -eq $env:ARPEGIO_EXE } | Select-Object -First 1).Id`], { encoding: 'utf8' }).trim();
   const closed = execFileSync('powershell', ['-NoProfile', '-Command', close.replace('[Dlg]::Close(0)', `[Dlg]::Close(${pid})`)], { encoding: 'utf8' }).trim();
   check(closed === 'True', `the folder dialog is a real window (${closed})`);
   await page.wait(`window.__picked !== 'pending'`);

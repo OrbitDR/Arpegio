@@ -1,8 +1,8 @@
 // Audio output and library. Every change is saved and applied at once.
 import { call } from '../api.js';
 import { h, icon, iconButton } from '../dom.js';
-import { reportError, toast } from '../feedback.js';
-import { count, dsdName, kilohertz } from '../format.js';
+import { openDialog, reportError, toast } from '../feedback.js';
+import { count, decibels, dsdName, kilohertz } from '../format.js';
 import { pageHeader, select } from '../parts.js';
 import { windowsVolumeWarning } from '../signal.js';
 import { set, state, watch } from '../store.js';
@@ -29,7 +29,67 @@ const REPLAY_GAIN_MODES = {
   album: ['Por álbum', 'Iguala el nivel entre álbumes y respeta las diferencias dentro de cada uno. La pista deja de ser bit-perfect.'],
 };
 
+const DOP_POLL_MS = 400;
+
 const send = (method, params) => call(method, params).catch(reportError);
+
+// Sends silence as DoP and asks what the DAC shows, which is the only way to know: neither ASIO nor WASAPI tell.
+function dopTest(device) {
+  const { key } = device;
+  let timer = 0;
+  const stop = (answer) => {
+    clearTimeout(timer);
+    return send('devices.stopDopTest', answer === undefined ? { key } : { key, confirmed: answer });
+  };
+  const finish = (answer, message) => {
+    dialog.close();
+    stop(answer).then(() => toast(message));
+  };
+  const asking = [
+    { label: 'No, indica PCM o nada', onclick: () => finish(false, 'DoP queda desactivado para este dispositivo.') },
+    { label: 'Sí, indica DSD', primary: true, onclick: () => finish(true, 'DoP confirmado para este dispositivo.') },
+  ];
+  const closing = [{ label: 'Cerrar', primary: true, onclick: () => { dialog.close(); stop(); } }];
+
+  const follow = async () => {
+    const test = await call('devices.dopTestStatus').catch(() => null);
+    if (test?.error) {
+      dialog.update('Prueba de DoP', [`No se pudo enviar DoP: ${test.error}`], closing);
+      return;
+    }
+    if (test?.sending) {
+      const lines = [`Se está enviando silencio DSD64 por DoP, a ${kilohertz(test.rate)} kHz en ${test.encoding}. No debería oírse nada.`,
+        'Mira la pantalla del DAC. ¿Qué indica?'];
+      if (test.windowsGainDb) {
+        lines.push(`El volumen de Windows de este dispositivo está en ${decibels(test.windowsGainDb)}, y eso impide reconocer DoP. Ponlo al 100 % y repite la prueba.`);
+      }
+      dialog.update('Prueba de DoP', lines, asking);
+    }
+    timer = setTimeout(follow, DOP_POLL_MS);
+  };
+
+  const dialog = openDialog({
+    title: 'Prueba de DoP',
+    text: ['Se detendrá la música y se enviará silencio al DAC, empaquetado como DoP. Si no lo entiende puede oírse un ruido bajo, así que baja su volumen antes de empezar.'],
+    actions: [
+      { label: 'Cancelar', onclick: () => dialog.close() },
+      {
+        label: 'Empezar',
+        primary: true,
+        onclick: async () => {
+          dialog.update('Prueba de DoP', ['Abriendo el dispositivo…'], []);
+          try {
+            await call('devices.startDopTest', { key });
+            follow();
+          } catch (error) {
+            dialog.update('Prueba de DoP', [error.message], closing);
+          }
+        },
+      },
+    ],
+    onclose: () => stop(),
+  });
+}
 
 function describe(device) {
   if (device.error) return `No disponible: ${device.error}`;
@@ -70,12 +130,14 @@ function deviceOptions(device) {
         ariaChecked: mode === active,
         onclick: () => configure({ dsd: mode }),
       }, DSD_MODES[mode][0])))));
-    rows.push(h('label.setting.check',
-      h('div.setting-text',
+    rows.push(h('div.setting',
+      h('label.setting-text.dop-check',
         h('strong', 'Mi DAC reconoce DoP'),
-        h('p', 'Ni ASIO ni WASAPI permiten detectarlo. Actívalo solo después de ver DSD en la pantalla del DAC.')),
+        h('p', 'Ni ASIO ni WASAPI permiten detectarlo. Pruébalo mirando la pantalla del DAC.')),
+      h('button.button.dop-test', { type: 'button', onclick: () => dopTest(device) }, 'Probar'),
       h('input', {
         type: 'checkbox',
+        ariaLabel: 'Mi DAC reconoce DoP',
         checked: chosen.dopConfirmed,
         onchange: (event) => configure({ dopConfirmed: event.target.checked }),
       })));

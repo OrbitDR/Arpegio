@@ -12,7 +12,7 @@ $repo = Resolve-Path "$PSScriptRoot\..\.."
 Set-Location $repo
 
 Remove-Item $Data -Recurse -Force -ErrorAction SilentlyContinue
-New-Item -ItemType Directory -Force "$Data\native", "$Data\outputs", "$Data\media", "$Data\volume" | Out-Null
+New-Item -ItemType Directory -Force "$Data\native", "$Data\outputs", "$Data\media", "$Data\volume", "$Data\dop" | Out-Null
 $silence = "$Data\silence"
 python tools\ui\make_silence.py $silence
 
@@ -36,6 +36,7 @@ foreach ($run in @(
     @('outputs', 'steps_clicks.mjs'),
     @('media', 'steps_media.mjs'),
     @('volume', 'steps_volume.mjs'),
+    @('dop', 'steps_dop.mjs'),
     @('outputs', 'steps_cpu.mjs')
 )) {
     node tools\ui\check.mjs --exe $exe --data "$Data\$($run[0])" --out $shots --steps "tools\ui\$($run[1])"
