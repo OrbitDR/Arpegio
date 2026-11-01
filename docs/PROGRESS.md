@@ -103,8 +103,10 @@ Segunda tanda el mismo día, con Windows al 100 %. Las 14 pruebas sonaron bien, 
 
 Los detalles y cifras están en [DESIGN.md](DESIGN.md#verificación-hecha-el-2026-10-30).
 
-- 130 pruebas automáticas sin fallos. Las 121 primeras pasaron también en 12 ejecuciones seguidas con la CPU al 100 %. Diez fallos introducidos a propósito en el motor, cinco en la biblioteca y doce en la detección de MQA y las secciones fueron detectados.
-- Aplicación real con la colección real y silencio digital: `tools\ui\run.ps1` hace más de 50 comprobaciones sobre la ventana, sin errores de consola. Ver [Interfaz](DESIGN.md#verificación-de-la-interfaz-2026-10-31).
+- 135 pruebas automáticas sin fallos, también en 8 ejecuciones seguidas con la CPU al 100 %. Diez fallos introducidos a propósito en el motor, cinco en la biblioteca, doce en la detección de MQA y las secciones y trece en los clics y en liberar el dispositivo fueron detectados.
+- Aplicación real con la colección real y silencio digital: `tools\ui\run.ps1` hace 137 comprobaciones sobre la ventana, sin errores de consola. Ver [Interfaz](DESIGN.md#verificación-de-la-interfaz-2026-10-31).
+- Clics con eventos de ratón reales: cada botón de la barra inferior acepta el clic en todos sus puntos, también si una actualización de estado llega durante la pulsación o si su icono cambia entre presionar y soltar. Ver [Clics](DESIGN.md#verificación-de-los-clics-2026-11-01).
+- Liberar el dispositivo contra otro proceso real, en WASAPI exclusivo y en ASIO con DSD nativo.
 - `LOOPBACK` del MiniFuse: coincidencia total a 24 bits en 44.1, 96 y 192 kHz.
 - 11 FLAC reales coinciden con su MD5.
 - DST idéntico a `libdstdec` en 18 000 frames, en 2 y 6 canales.
@@ -119,7 +121,7 @@ Los detalles y cifras están en [DESIGN.md](DESIGN.md#verificación-hecha-el-202
 
 ## Implementado pero sin verificar
 
-- **Interfaz con música real.** Todas las rutas se recorrieron con silencio digital y señal inaudible. Falta escuchar seek, siguiente, anterior y cambio de salida con música, por si hay clics.
+- **Interfaz con música real.** Todas las rutas se recorrieron con silencio digital y señal inaudible. Falta escuchar seek, siguiente, anterior, cambio de salida y liberar el dispositivo con música, por si hay clics.
 - Reordenar la cola arrastrando: probado con eventos simulados, no con el ratón.
 - Paso sin hueco: pasó de oído en SACD, CUE y archivos separados, sin comparar la salida real muestra a muestra.
 - DoP por ASIO con el volumen de Windows bajo: ASIO no consulta ese volumen, y no se sabe si le afecta.
@@ -133,7 +135,7 @@ Los detalles y cifras están en [DESIGN.md](DESIGN.md#verificación-hecha-el-202
 - Calidad medida de r8brain en esta integración: solo corrió con silencio.
 - Vigilancia de carpetas sobre la colección real: solo se probó con carpetas temporales.
 - Hoja CUE en el bloque `CUESHEET` nativo de FLAC: solo se lee la etiqueta del mismo nombre.
-- Las comprobaciones completas de `tools\ui\run.ps1` no se repitieron tras añadir las secciones, porque reproducen por el DAC y pulsan teclas multimedia. Solo se ejecutó `steps_sections.mjs`.
+- Liberar el dispositivo mientras otro programa espera para tomarlo: se comprobó que puede abrirlo después, no que un programa ya abierto recupere el sonido por sí solo.
 - MQA en ALAC: la colección no tiene ningún ALAC. El detector no depende del formato, pero solo se probó con FLAC reales y WAV sintéticos.
 
 ## Problema abierto
@@ -177,7 +179,7 @@ Con tasas tan bajas, 39 ejecuciones no bastan para afirmar que las dos últimas 
 - Sin selección múltiple de pistas.
 - La cola no se refresca si un reescaneo cambia las etiquetas de una pista que ya está en ella.
 - Sin controles de Windows en la pantalla de bloqueo ni en la miniatura de la barra de tareas. Las teclas multimedia sí funcionan, salvo que otro programa las tenga reservadas.
-- Actualizar la lista de dispositivos exige parar la música: cargar otra copia de un driver ASIO en uso puede tumbarlo.
+- Actualizar la lista de dispositivos exige parar la música: cargar otra copia de un driver ASIO en uso puede tumbarlo. El botón de liberar el dispositivo basta para eso. En WASAPI compartido está desactivado, y la única forma de parar es vaciar la cola.
 - Sin arrastrar archivos desde el Explorador.
 - WebView2 ocupa unos 420 MB de memoria en 7 procesos.
 
@@ -258,7 +260,7 @@ Aplicación real, con silencio digital por las salidas reales. La carpeta de mú
 powershell -File tools\ui\run.ps1 -MusicFolder "D:\Música" -Device topping
 ```
 
-Abre y cierra la ventana varias veces, minimiza, pulsa teclas multimedia y cambia el formato del DAC. Las capturas quedan en `%TEMP%\arpegio-ui-check\shots`. `tools\ui\check.mjs` sirve para escribir otras pruebas: controla la aplicación por el protocolo de DevTools de Chromium con `--devtools`.
+Abre y cierra la ventana varias veces, minimiza, pulsa teclas multimedia, abre el dispositivo desde otro proceso y cambia el formato del DAC. Con la colección real tarda unos 5 minutos. Las capturas quedan en `%TEMP%\arpegio-ui-check\shots`. `tools\ui\check.mjs` sirve para escribir otras pruebas: controla la aplicación por el protocolo de DevTools de Chromium con `--devtools`. Devuelve error si falla cualquier comprobación de un paso.
 
 Señal inaudible para probar hardware: `arpegio-dsdgen` sin tonos, por ejemplo `.\arpegio-dsdgen.exe quiet64.dsf ntf64.txt 2822400 20`. Para otras tasas, generar antes el diseño con `design_ntf.py 128` o `256`.
 
@@ -272,6 +274,8 @@ Señal inaudible para probar hardware: `arpegio-dsdgen` sin tonos, por ejemplo `
 - La descarga del binario de FFmpeg fue bloqueada por el control de permisos. FFmpeg no hace falta y no se debe reintentar.
 - Los archivos de `ui/` se copian junto al ejecutable en cada compilación. Sin compilar, `arpegio.exe` sigue usando la copia anterior.
 - En JavaScript, `elemento.append(null)` escribe el texto «null». Los hijos condicionales van por `fill()` de `dom.js` o dentro de `h()`.
+- `element.click()` no pasa por la detección de lo que hay bajo el puntero: un botón tapado o un clic perdido no se ven. Para probar que se puede pulsar algo hay que usar `Input.dispatchMouseEvent`, y mirar sobre qué botón cayó el clic: una presión fuera de la pantalla también puede contar como clic en otro sitio.
+- Mientras suena llega un `status` cada 200 ms. Reconstruir algo que tenga controles en cada actualización pierde clics. Lo que cambia con el estado se actualiza en su sitio.
 - La salida simulada de las pruebas corre unas 40 veces más rápido que el tiempo real. Una prueba que mire un momento concreto de una pista debe pausar antes, o fallará con la máquina cargada.
 - En el `status` del controlador, `index` y `trackId` salen de la cola, no de lo que suena. Una prueba con silencio solo distingue la pista real por `duration`, que viene del decoder abierto: es lo que comprueba `Harness::sounding` en `test_controller.cpp`. Mirando `trackId`, un motor que sigue con la pista anterior pasa la prueba.
 - Desde PowerShell, un `$null` pasado a `FindWindowW` llega como cadena vacía y no encuentra nada. Las pruebas de minimizar parecían pasar sin haber minimizado.

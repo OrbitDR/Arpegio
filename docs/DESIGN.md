@@ -121,6 +121,33 @@ Página (ui/) <── JSON ──> MainWindow (WebView2) <──> Controller ─
 - **El anillo va por delante de lo que se oye.** A 44.1 kHz son hasta 90 s. Por eso `Player` distingue la pista que se decodifica de la que se oye: `seek` actúa sobre la segunda, y una edición de la cola que afecte a lo ya decodificado rellena el anillo desde la posición actual.
 - **Nombres en español solo al mostrar.** El catálogo guarda `Various Artists`, y `Controller` lo traduce al enviarlo a la página.
 - **Las secciones son una ruta, no un estado.** Junto al buscador, cada botón abre `{ view: 'albums', section }`, y la propia vista filtra la lista de álbumes. Atrás, adelante y la posición de desplazamiento funcionan sin código propio. Si no caben, los botones bajan a una segunda línea en vez de ocultarse: con la ventana mínima y la cola abierta quedan unos 400 px.
+- **Nada se reconstruye bajo el puntero.** Chromium descarta el clic si el elemento que recibió la presión sale de la página antes de soltar. El estado llega cada 200 ms y un clic dura unos 100, así que reemplazar un icono en cada actualización perdía cerca de la mitad de los clics sobre él. Por eso `setIcon` solo toca la página si el icono cambia, los elementos se actualizan en su sitio y `button * { pointer-events: none }` hace que la presión caiga siempre en el botón, aunque su icono cambie de verdad entre presionar y soltar.
+- **Liberar el dispositivo es detenerse sin perder el sitio.** Una pausa mantiene el flujo abierto con silencio, así que la salida sigue ocupada. `devices.release` cierra el flujo y guarda la pista y la posición que se oyen, no las del cargador, que puede ir una pista por delante. Solo Reproducir vuelve a tomar la salida. `deviceHeld` es falso en WASAPI compartido, porque ese flujo no impide el paso a nadie y no hay nada que liberar.
+
+## Verificación de los clics, 2026-11-01
+
+Con eventos de ratón reales, en una rejilla de puntos de cada botón, manteniendo la presión hasta que llega una actualización de estado. Lo reproduce `tools\ui\steps_clicks.mjs`. `element.click()`, que usaban las pruebas anteriores, no pasa por la detección de lo que hay bajo el puntero, y por eso nunca lo vieron.
+
+| Botón | Puntos que aceptan el clic, antes | Después |
+|---|---|---|
+| Reproducir y pausar | 12 de 61 | 61 de 61 |
+| Favorito | 21 de 37 | 37 de 37 |
+| Repetir | 21 de 37 | 37 de 37 |
+| Formato y bit-perfect | 10 de 25 | 25 de 25 |
+| Carátula, mezclar, anterior, siguiente y cola | Todos | Todos |
+
+Durante un escaneo, Ajustes perdía los clics en sus botones, 0 de 8 en la prueba, porque cada evento de la biblioteca redibujaba toda la vista. Ahora solo se redibuja el progreso, y acepta los 8.
+
+Liberar el dispositivo, en el Topping y con silencio digital, contra otro proceso real, que es `arpegio-cli`:
+
+| Prueba | Resultado |
+|---|---|
+| WASAPI exclusivo retenido por Arpegio | Rechazado: `another application is using the device in exclusive mode` |
+| Tras liberarlo | Abre y reproduce, y Arpegio no lo vuelve a tomar |
+| Tras pulsar Reproducir | Vuelve a sonar donde estaba, y el otro proceso queda rechazado otra vez |
+| ASIO con DSD64 nativo: liberar, otro proceso reproduce PCM por ese driver, y Reproducir | Vuelve a DSD nativo en el mismo punto, con 0 cortes y 0 tardíos |
+
+Con ASIO no se probó abrir el driver desde otro proceso mientras Arpegio lo retiene: una segunda copia de un driver en uso puede tumbarlo.
 
 ## Verificación de la interfaz, 2026-10-31
 

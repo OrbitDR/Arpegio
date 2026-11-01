@@ -21,6 +21,8 @@ Junto al buscador están las secciones por tipo de archivo: MQA, DSD, CD, PCM Hi
 
 En Ajustes se elige la salida. Por defecto usa WASAPI compartido, que no es bit-perfect. No hay volumen por software, así que el volumen se ajusta en el DAC, y con WASAPI conviene tener el de Windows al 100 %.
 
+Por ASIO y WASAPI exclusivo, Arpegio retiene el dispositivo mientras suena y también en pausa, y ningún otro programa puede usarlo. El enchufe dorado a la derecha del indicador bit-perfect lo libera: detiene la música y queda desconectado en gris. Reproducir vuelve a tomar el dispositivo desde el mismo punto. En WASAPI compartido no retiene nada, y el enchufe queda en gris.
+
 | Teclas | Acción |
 |---|---|
 | Espacio | Reproducir o pausar |
