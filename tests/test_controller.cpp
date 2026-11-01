@@ -1,6 +1,7 @@
 #include <windows.h>
 
 #include <atomic>
+#include <cmath>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -163,16 +164,35 @@ struct Harness {
         return until([this] { return last_event.contains("devices") && last_event["devices"]["known"].get<bool>(); });
     }
 
-    // Three tracks in one folder, catalogued and ready to play.
-    std::vector<int64_t> library_with_tracks(double seconds = 30.0) {
-        for (int i = 1; i <= 3; ++i) write_wav(music / (L"pista " + std::to_wstring(i) + L".wav"), seconds);
+    void catalogue(const std::vector<double>& lengths) {
+        for (size_t i = 0; i < lengths.size(); ++i) {
+            write_wav(music / (L"pista " + std::to_wstring(i + 1) + L".wav"), lengths[i]);
+        }
         open();
         CHECK(devices_ready());
         call("library.addFolder", {{"path", path_to_utf8(music)}});
         CHECK(until([this] { return !call("library.tracks").empty(); }));
+    }
+
+    // Three tracks in one folder, catalogued and ready to play.
+    std::vector<int64_t> library_with_tracks(double seconds = 30.0) {
+        catalogue({seconds, seconds, seconds});
         std::vector<int64_t> ids;
         for (const json& track : call("library.tracks")) ids.push_back(track.at("id"));
         CHECK(ids.size() == 3);
+        return ids;
+    }
+
+    // Tracks of these lengths, in this order, so sounding() can tell them apart.
+    std::vector<int64_t> library_with_lengths(const std::vector<double>& lengths) {
+        catalogue(lengths);
+        std::vector<int64_t> ids;
+        for (const double length : lengths) {
+            for (const json& track : call("library.tracks")) {
+                if (std::abs(track.at("seconds").get<double>() - length) < 0.1) ids.push_back(track.at("id"));
+            }
+        }
+        CHECK(ids.size() == lengths.size());
         return ids;
     }
 
@@ -183,6 +203,14 @@ struct Harness {
 
     bool until_state(const std::string& state) {
         return until([&] { return status().at("state") == state; });
+    }
+
+    // The silence all tracks share hides which one plays, and the rest of the status comes from the
+    // queue. Only the duration is read from the decoder that is open.
+    bool sounding(double length) {
+        const json now = status();
+        return now.at("state") == "playing" && now.at("position").get<double>() > 0.05 &&
+               std::abs(now.at("duration").get<double>() - length) < 0.1;
     }
 };
 
@@ -259,6 +287,18 @@ TEST(controller_plays_a_queue_and_reports_the_track) {
     const json plan = h.status().at("plan");
     CHECK(plan.at("path") == "pcm");
     CHECK(plan.at("rate") == 44100);
+}
+
+TEST(controller_a_new_queue_replaces_the_track_at_the_same_index) {
+    Harness h;
+    const auto ids = h.library_with_lengths({120.0, 150.0});
+    h.call("queue.play", {{"tracks", {ids[0]}}});
+    CHECK(h.until([&] { return h.sounding(120.0); }));
+
+    h.call("queue.play", {{"tracks", {ids[1]}}});
+    CHECK(h.until([&] { return h.sounding(150.0); }));
+    CHECK(h.status().at("trackId") == ids[1]);
+    CHECK(h.opened == 1);
 }
 
 TEST(controller_toggle_pauses_and_resumes) {
@@ -353,15 +393,29 @@ TEST(controller_edits_the_queue_around_the_current_track) {
     CHECK(h.opened == 1);
 }
 
+TEST(controller_play_next_reaches_the_tracks_already_in_the_ring) {
+    Harness h;
+    const auto ids = h.library_with_lengths({30.0, 120.0, 45.0});
+    h.call("queue.play", {{"tracks", {ids[0], ids[1]}}});
+    CHECK(h.until([&] { return h.sounding(30.0); }));
+    h.call("player.toggle");
+    CHECK(h.until_state("paused"));
+    Sleep(50);  // the first track fits in the ring, so the loader is on the second by now
+
+    h.call("queue.playNext", {{"tracks", {ids[2]}}});
+    h.call("player.toggle");
+    CHECK(h.until([&] { return h.sounding(45.0); }));
+}
+
 TEST(controller_removing_the_track_being_heard_moves_to_the_next_one) {
     Harness h;
-    const auto ids = h.library_with_tracks(120.0);
+    const auto ids = h.library_with_lengths({120.0, 150.0, 60.0});
     h.call("queue.play", {{"tracks", ids}});
-    CHECK(h.until_state("playing"));
-    h.until([&] { return h.status().at("position").get<double>() > 0.05; });
+    CHECK(h.until([&] { return h.sounding(120.0); }));
 
     h.call("queue.remove", {{"index", 0}});
-    CHECK(h.until([&] { return h.status().at("trackId") == ids[1]; }));
+    CHECK(h.until([&] { return h.sounding(150.0); }));
+    CHECK(h.status().at("trackId") == ids[1]);
     CHECK(h.status().at("index") == 0);
     // It starts from the beginning: the position belonged to the removed track.
     h.call("player.toggle");

@@ -269,6 +269,15 @@ bool wait_for_index(Player& player, size_t index) {
     return false;
 }
 
+// The duration comes from the decoder that is open, while the index only says where the queue is.
+bool wait_for_duration(Player& player, double seconds) {
+    for (int i = 0; i < 2000; ++i) {
+        if (std::abs(player.status().duration_seconds - seconds) < 1e-3) return true;
+        Sleep(2);
+    }
+    return false;
+}
+
 // The capture contains this ramp value somewhere after `from`.
 bool contains_sample(const std::vector<uint8_t>& capture, size_t from, int64_t value) {
     const int32_t wanted = static_cast<int32_t>(value * 256);
@@ -382,6 +391,29 @@ TEST(play_while_playing_reuses_the_device) {
     CHECK(f.opened == 1);
 }
 
+TEST(a_new_queue_plays_its_own_track_at_the_index_being_decoded) {
+    constexpr int64_t kChosen = 6000000;  // past every value of the track it replaces
+    CountingFixture f;
+    QueueItem playing = ramp(1, 96000 * 60);
+    QueueItem chosen = ramp(kChosen, 96000 * 20);
+    playing.id = 1;
+    chosen.id = 2;
+    f.player.set_queue({playing});
+    f.player.play();
+    hold_at_first_sound(f.player);
+    const size_t before = f.capture->size();
+
+    f.player.set_queue({chosen});
+    f.player.play(0);
+    CHECK(wait_for_duration(f.player, 20.0));
+    CHECK(wait_for_position(f.player, 1.0));
+    f.player.stop();
+    CHECK(f.player.wait_until_stopped(5000));
+
+    CHECK(f.opened == 1);
+    CHECK(contains_sample(*f.capture, before, kChosen));
+}
+
 TEST(a_jump_to_another_format_reopens_at_once) {
     CountingFixture f;
     f.player.set_queue({ramp(1, 96000 * 30, 96000), ramp(1, 44100 * 2, 44100)});
@@ -442,6 +474,25 @@ TEST(editing_the_tracks_already_in_the_ring_refills_from_the_position_heard) {
     CHECK(f.player.wait_until_stopped(30000));
     CHECK(f.opened == 1);
     CHECK(contains_sample(*f.capture, before, 5000000));
+}
+
+TEST(moving_the_heard_track_onto_the_index_being_decoded_keeps_it_heard) {
+    CountingFixture f;
+    QueueItem heard = ramp(1, 96000 * 8);
+    QueueItem decoding = ramp(kTrackTwo, 96000 * 100);  // longer than the ring, so the loader stays on it
+    heard.id = 1;
+    decoding.id = 2;
+    f.player.set_queue({heard, decoding});
+    f.player.play();
+    hold_at_first_sound(f.player);
+    Sleep(50);
+    const size_t before = f.capture->size();
+
+    f.player.update_queue({decoding, heard}, 1);
+    f.player.set_paused(false);
+    CHECK(f.player.wait_until_stopped(30000));
+    CHECK(f.opened == 1);
+    CHECK(contains_sample(*f.capture, before, 1 + 96000 * 5));
 }
 
 TEST(editing_before_the_current_track_only_renumbers_it) {

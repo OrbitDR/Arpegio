@@ -377,7 +377,8 @@ std::optional<double> Player::take_jump() {
     return seconds;
 }
 
-Player::PumpResult Player::pump(Decoder& decoder, const SourceFormat& source, std::optional<double> seek) {
+Player::PumpResult Player::pump(Decoder& decoder, const SourceFormat& source, int64_t track_id,
+                                std::optional<double> seek) {
     const double bytes_per_second = static_cast<double>(plan_.device.frame_bytes()) * plan_.device.ring_frame_rate();
     uint64_t refill_target = 0;
     for (;;) {
@@ -387,7 +388,9 @@ Player::PumpResult Player::pump(Decoder& decoder, const SourceFormat& source, st
             std::lock_guard lock(mutex_);
             index = loader_index_;
             if (jump_request_) {
-                if (jump_request_->index != index) return PumpResult::Jump;
+                // A changed queue can hold another track at this index, and the decoder only has its own.
+                const bool same_track = index < queue_.size() && queue_[index].id == track_id;
+                if (jump_request_->index != index || !same_track) return PumpResult::Jump;
                 seek = jump_request_->seconds;
                 jump_request_.reset();
             }
@@ -510,7 +513,7 @@ void Player::run_queue(double start_seconds) {
             waiting_position_ = start.value_or(0.0);
         }
         add_segment(index, 0.0, source.seconds());
-        const PumpResult result = pump(*decoder, source, start);
+        const PumpResult result = pump(*decoder, source, item.id, start);
         if (result == PumpResult::Stop) return;
         if (result == PumpResult::Jump) {
             follow_jump();

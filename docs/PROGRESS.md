@@ -103,7 +103,7 @@ Segunda tanda el mismo día, con Windows al 100 %. Las 14 pruebas sonaron bien, 
 
 Los detalles y cifras están en [DESIGN.md](DESIGN.md#verificación-hecha-el-2026-10-30).
 
-- 126 pruebas automáticas sin fallos. Las 121 anteriores pasaron también en 12 ejecuciones seguidas con la CPU al 100 %. Diez fallos introducidos a propósito en el motor, cinco en la biblioteca y doce en la detección de MQA y las secciones fueron detectados.
+- 130 pruebas automáticas sin fallos. Las 121 primeras pasaron también en 12 ejecuciones seguidas con la CPU al 100 %. Diez fallos introducidos a propósito en el motor, cinco en la biblioteca y doce en la detección de MQA y las secciones fueron detectados.
 - Aplicación real con la colección real y silencio digital: `tools\ui\run.ps1` hace más de 50 comprobaciones sobre la ventana, sin errores de consola. Ver [Interfaz](DESIGN.md#verificación-de-la-interfaz-2026-10-31).
 - `LOOPBACK` del MiniFuse: coincidencia total a 24 bits en 44.1, 96 y 192 kHz.
 - 11 FLAC reales coinciden con su MD5.
@@ -139,6 +139,16 @@ Los detalles y cifras están en [DESIGN.md](DESIGN.md#verificación-hecha-el-202
 ## Problema abierto
 
 Una ejecución de `arpegio-library verify` sobre el catálogo multicanal se quedó parada, sin usar CPU, tras 33 s de CPU, y hubo que matarla. No se repitió en 17 ejecuciones posteriores, seis de ellas en las mismas condiciones, y las 5 184 pistas abren bien. No se encontró la causa, ni se sabe si fue en un decodificador o al cerrar el proceso. Si vuelve a ocurrir, capturar los hilos del proceso antes de matarlo.
+
+Tres comprobaciones fallan de vez en cuando, casi siempre con la CPU cargada. Medido el 2026-11-01 con 48 ejecuciones completas de las 130 pruebas y 39 de las 126 anteriores al arreglo de la cola:
+
+| Comprobación | Con el arreglo | Antes | Qué se sabe |
+|---|---|---|---|
+| `controller_shuffle_keeps_the_current_track_in_front`: `index == 0` | 2 de 48 | 4 de 39 | Carrera del motor, leída en el código y no confirmada con un experimento. `run_queue` copia el índice antes de abrir el decoder sin el candado y `add_segment` lo usa después, así que un `update_queue` en medio deja el segmento con el índice antiguo hasta que acaba la pista. `worker` tiene una ventana parecida al copiar `play_request_` sobre `loader_index_`. Hace falta editar la cola justo cuando empieza una pista |
+| `library_follows_a_watched_folder`: `wait_for_tracks(library, 2)` | 2 de 48 | 0 de 39 | No pasa por el motor. Sospecha sin confirmar: el constructor de `FolderWatcher` vuelve antes de que su hilo llame a `ReadDirectoryChangesW`, y lo que cambie en ese intervalo no se ve hasta el siguiente escaneo |
+| `seek_lands_on_the_right_sample`: `underruns == 0` | 1 de 48 | 0 de 39 | Sin investigar. Sus pistas tienen todas id 0, así que siguen el mismo camino que antes del arreglo. La salida simulada solo da unos milisegundos de margen tras un seek |
+
+Con tasas tan bajas, 39 ejecuciones no bastan para afirmar que las dos últimas no fallaran ya antes.
 
 ## Limitaciones actuales del motor
 
@@ -263,6 +273,7 @@ Señal inaudible para probar hardware: `arpegio-dsdgen` sin tonos, por ejemplo `
 - Los archivos de `ui/` se copian junto al ejecutable en cada compilación. Sin compilar, `arpegio.exe` sigue usando la copia anterior.
 - En JavaScript, `elemento.append(null)` escribe el texto «null». Los hijos condicionales van por `fill()` de `dom.js` o dentro de `h()`.
 - La salida simulada de las pruebas corre unas 40 veces más rápido que el tiempo real. Una prueba que mire un momento concreto de una pista debe pausar antes, o fallará con la máquina cargada.
+- En el `status` del controlador, `index` y `trackId` salen de la cola, no de lo que suena. Una prueba con silencio solo distingue la pista real por `duration`, que viene del decoder abierto: es lo que comprueba `Harness::sounding` en `test_controller.cpp`. Mirando `trackId`, un motor que sigue con la pista anterior pasa la prueba.
 - Desde PowerShell, un `$null` pasado a `FindWindowW` llega como cadena vacía y no encuentra nada. Las pruebas de minimizar parecían pasar sin haber minimizado.
 - La colección real descubre lo que las pruebas sintéticas no: un `.flac` con ID3v2 delante cerraba el programa, y había híbridos `.iso.wv`, FLAC sin longitud en la cabecera y hojas con tiempos fuera de norma. Tras tocar decodificadores o escáner, repetir `scan` y `verify`.
 - Windows sella los archivos con un reloj de unos 15 ms. Una prueba que reescribe un archivo del mismo tamaño justo después de escanearlo debe mover la fecha a mano.

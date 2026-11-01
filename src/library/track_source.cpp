@@ -13,7 +13,7 @@ std::unique_ptr<Decoder> open_track(const Track& track) {
 }
 
 QueueItem make_queue_item(const Track& track) {
-    return {track.path, [track] { return open_track(track); }};
+    return {track.path, [track] { return open_track(track); }, track.id};
 }
 
 }  // namespace arpegio

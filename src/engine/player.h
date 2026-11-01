@@ -25,7 +25,7 @@ namespace arpegio {
 struct QueueItem {
     std::filesystem::path path;
     std::function<std::unique_ptr<Decoder>()> open;  // overrides `path` when set
-    int64_t id = 0;                                  // what update_queue() compares
+    int64_t id = 0;                                  // tells tracks apart when the queue changes under them
 };
 
 enum class PlayerState { Stopped, Playing, Paused };
@@ -101,7 +101,7 @@ private:
 
     void worker();
     void run_queue(double start_seconds);
-    PumpResult pump(Decoder& decoder, const SourceFormat& source, std::optional<double> seek);
+    PumpResult pump(Decoder& decoder, const SourceFormat& source, int64_t track_id, std::optional<double> seek);
     std::optional<double> take_jump();
     bool write_all(const std::vector<uint8_t>& bytes);
     void open_session(const RenderPlan& plan, const SourceFormat& source);
