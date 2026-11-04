@@ -12,7 +12,7 @@ $repo = Resolve-Path "$PSScriptRoot\..\.."
 Set-Location $repo
 
 Remove-Item $Data -Recurse -Force -ErrorAction SilentlyContinue
-New-Item -ItemType Directory -Force "$Data\native", "$Data\outputs", "$Data\media", "$Data\volume", "$Data\dop" | Out-Null
+New-Item -ItemType Directory -Force "$Data\native", "$Data\outputs", "$Data\media", "$Data\volume", "$Data\dop", "$Data\frame" | Out-Null
 $silence = "$Data\silence"
 $env:ARPEGIO_BUILD = $Build
 python tools\ui\make_silence.py $silence
@@ -32,6 +32,7 @@ if (-not $window) { 'FAIL the window place was not saved'; exit 1 }
 "ok   window place saved: $($window.width) x $($window.height) at $($window.x), $($window.y)"
 foreach ($run in @(
     @('native', 'steps_sections.mjs'),
+    @('frame', 'steps_frame.mjs'),
     @('outputs', 'steps_outputs.mjs'),
     @('outputs', 'steps_interaction.mjs'),
     @('outputs', 'steps_clicks.mjs'),

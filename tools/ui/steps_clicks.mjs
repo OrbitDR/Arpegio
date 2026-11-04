@@ -241,7 +241,7 @@ export default async function run(page, { sleep }) {
     check(released.index === before.index, 'on the same track');
     const free = await page.eval(deviceState);
     check(!free.on && free.disabled, 'the button shows it free');
-    check((await page.eval(`document.querySelector('.bar-quality .badge') === null`)), 'there is no signal path to judge');
+    check((await page.eval(`document.querySelector('.bar-quality .bar-status') === null`)), 'there is no signal path to judge');
     await page.shot('51-device-free');
 
     const allowed = anotherProgram();
@@ -289,20 +289,36 @@ export default async function run(page, { sleep }) {
     check(after.underruns === 0 && after.late === 0, `without cuts (${after.underruns} underruns, ${after.late} late)`);
   }
 
-  // The bar must keep its place with the longest labels, down to the smallest window.
+  // The bar must keep its place with the longest labels, down to the smallest window, and the transport its
+  // place in the middle. The readout picks its short form when the long one does not fit.
+  await page.eval(`(() => {
+    document.querySelector('.format-tag').textContent = 'AIFF';
+    document.querySelector('.detail-long').textContent = '32 bits · 352.8 kHz';
+    document.querySelector('.detail-short').textContent = '32/352.8';
+    return true;
+  })()`);
   for (const width of [1320, 1081, 1080, 900]) {
     await page.size(width, 700);
     await sleep(300);
-    const spill = await page.eval(`(() => {
-      document.querySelector('.bar-format')?.replaceChildren('MQA 24/352.8');
-      const right = document.querySelector('.bar-right').getBoundingClientRect();
-      const center = document.querySelector('.bar-center').getBoundingClientRect();
+    const shown = await page.eval(`(() => {
+      const box = (selector) => document.querySelector(selector).getBoundingClientRect();
+      const right = box('.bar-right');
+      const center = box('.bar-center');
+      const toggle = box('.bar-toggle');
       const quality = document.querySelector('.bar-quality');
-      const device = document.querySelector('.bar-device').getBoundingClientRect();
-      const queue = document.querySelector('.bar-right .icon-button:last-child').getBoundingClientRect();
-      return right.left >= center.right && quality.scrollWidth <= quality.clientWidth && device.right <= queue.left && queue.right <= innerWidth;
+      const detail = document.querySelector('.format-detail');
+      const text = detail.querySelector(detail.classList.contains('short') ? '.detail-short' : '.detail-long');
+      const queue = box('.bar-right .icon-button:last-child');
+      return {
+        fits: right.left >= center.right && quality.scrollWidth <= quality.clientWidth && box('.bar-device').right <= queue.left
+          && queue.right <= innerWidth && text.getBoundingClientRect().width <= detail.getBoundingClientRect().width + 0.01
+          && document.querySelector('.bar-status').scrollWidth <= document.querySelector('.bar-status').clientWidth,
+        offCentre: Math.abs((toggle.left + toggle.right) / 2 - innerWidth / 2),
+        short: detail.classList.contains('short'),
+      };
     })()`);
-    check(spill, `the right of the bar fits at ${width} px`);
+    check(shown.fits, `the right of the bar fits at ${width} px${shown.short ? ', with the short format' : ''}`);
+    check(shown.offCentre < 1, `and the transport is in the middle (${shown.offCentre.toFixed(2)} px off)`);
   }
   await page.size(1320, 860);
 

@@ -6,7 +6,7 @@ import { selectedDevice } from './store.js';
 const KIND_NAMES = { asio: 'ASIO', exclusive: 'WASAPI exclusivo', shared: 'WASAPI compartido' };
 const RESAMPLER_NAMES = { r8brain: 'r8brain', soxr: 'SoX' };
 
-function processingLines(plan, track, status) {
+export function processingLines(plan, track, status) {
   switch (plan.path) {
     case 'dsdNative': return ['Ninguno: el flujo DSD llega intacto'];
     case 'dop': return ['Empaquetado DoP, sin tocar los bits DSD'];

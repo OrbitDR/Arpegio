@@ -2,6 +2,8 @@
 //   --data FOLDER  catalogue, cache and settings, by default %LOCALAPPDATA%\Arpegio
 //   --ui FOLDER    the page, by default the ui folder next to the executable
 //   --devtools     allows the browser's developer tools
+//   --no-devices   lists no outputs, so the page can be worked on while another program plays: listing loads
+//                  every ASIO driver, and a second copy of one in use can bring it down
 #include <windows.h>
 
 #include <objbase.h>
@@ -56,6 +58,7 @@ AppOptions parse_options() {
         if (argument == L"--data" && has_value) options.data_folder = arguments[++i];
         else if (argument == L"--ui" && has_value) options.ui_folder = arguments[++i];
         else if (argument == L"--devtools") options.dev_tools = true;
+        else if (argument == L"--no-devices") options.list_devices = false;
     }
     LocalFree(arguments);
     if (options.data_folder.empty()) options.data_folder = default_data_folder();

@@ -33,14 +33,15 @@ constexpr UINT kPickFolderMessage = WM_APP + 1;
 constexpr UINT kMediaCommandMessage = WM_APP + 2;
 constexpr UINT kMediaSeekMessage = WM_APP + 3;
 
-constexpr COLORREF kCaptionColor = RGB(0x12, 0x13, 0x16);
 constexpr COREWEBVIEW2_COLOR kPageColor = {255, 0x0E, 0x0F, 0x11};
+constexpr COREWEBVIEW2_COLOR kClear = {0, 0, 0, 0};
 constexpr int kDefaultWidth = 1320;
 constexpr int kDefaultHeight = 860;
 constexpr int kMinimumWidth = 900;
 constexpr int kMinimumHeight = 600;
 
 constexpr const char* kPickFolderRequest = "library.pickFolder";
+constexpr std::string_view kWindowRequests = "window.";
 
 // Owns a string WebView2 allocated for us.
 struct CoString {
@@ -64,6 +65,7 @@ MainWindow::MainWindow(HINSTANCE instance, AppOptions options) : options_(std::m
     Controller::Options controller;
     controller.data_folder = options_.data_folder;
     controller.emit = [this](const std::string& event, const json& data) { post({{"event", event}, {"data", data}}); };
+    if (!options_.list_devices) controller.list_devices = [] { return std::vector<DeviceInfo>{}; };
     controller_ = std::make_unique<Controller>(std::move(controller));
 
     WNDCLASSEXW window_class{};
@@ -71,7 +73,6 @@ MainWindow::MainWindow(HINSTANCE instance, AppOptions options) : options_(std::m
     window_class.lpfnWndProc = window_proc;
     window_class.hInstance = instance;
     window_class.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-    window_class.hbrBackground = CreateSolidBrush(RGB(kPageColor.R, kPageColor.G, kPageColor.B));
     window_class.lpszClassName = kWindowClass;
     window_class.hIcon = LoadIconW(instance, MAKEINTRESOURCEW(IDI_ARPEGIO));
     window_class.hIconSm = window_class.hIcon;
@@ -83,11 +84,7 @@ MainWindow::MainWindow(HINSTANCE instance, AppOptions options) : options_(std::m
                               saved ? placement->y : CW_USEDEFAULT, saved ? placement->width : kDefaultWidth,
                               saved ? placement->height : kDefaultHeight, nullptr, nullptr, instance, this);
     if (!window_) throw std::runtime_error("cannot create the window");
-
-    const BOOL dark = TRUE;
-    DwmSetWindowAttribute(window_, DWMWA_USE_IMMERSIVE_DARK_MODE, &dark, sizeof(dark));
-    const COLORREF caption = kCaptionColor;
-    DwmSetWindowAttribute(window_, DWMWA_CAPTION_COLOR, &caption, sizeof(caption));
+    apply_frame();
 
     // Before the window is shown: that is when Windows announces the taskbar button.
     taskbar_button_created_ = RegisterWindowMessageW(L"TaskbarButtonCreated");
@@ -130,12 +127,22 @@ LRESULT MainWindow::on_message(UINT message, WPARAM wparam, LPARAM lparam) {
         return 0;
     }
     switch (message) {
+    case WM_NCCALCSIZE:
+        return on_calc_size(wparam, lparam);
+    case WM_ERASEBKGND:
+        paint_background(reinterpret_cast<HDC>(wparam));
+        return 1;
+    case WM_ACTIVATE:
+        active_ = LOWORD(wparam) != WA_INACTIVE;
+        post_window_state();
+        return DefWindowProcW(window_, message, wparam, lparam);
     case WM_SIZE:
         if (host_) {
             // A hidden page stops rendering, which leaves the machine quieter for the music.
             host_->put_IsVisible(wparam != SIZE_MINIMIZED);
             resize_webview();
         }
+        if (wparam != SIZE_MINIMIZED && maximized_shown_ != (IsZoomed(window_) != FALSE)) post_window_state();
         return 0;
     case WM_MOVE:
         if (host_) host_->NotifyParentWindowPositionChanged();
@@ -148,6 +155,14 @@ LRESULT MainWindow::on_message(UINT message, WPARAM wparam, LPARAM lparam) {
         const UINT dpi = GetDpiForWindow(window_);
         limits->ptMinTrackSize.x = MulDiv(kMinimumWidth, dpi, 96);
         limits->ptMinTrackSize.y = MulDiv(kMinimumHeight, dpi, 96);
+        // Without a caption, Windows would maximize over the taskbar.
+        MONITORINFO monitor{sizeof(monitor)};
+        if (GetMonitorInfoW(MonitorFromWindow(window_, MONITOR_DEFAULTTONEAREST), &monitor)) {
+            const RECT& work = monitor.rcWork;
+            const int border = frame_thickness();
+            limits->ptMaxPosition = {work.left - monitor.rcMonitor.left - border, work.top - monitor.rcMonitor.top - border};
+            limits->ptMaxSize = {work.right - work.left + 2 * border, work.bottom - work.top + 2 * border};
+        }
         return 0;
     }
     case WM_DPICHANGED: {
@@ -206,6 +221,89 @@ LRESULT MainWindow::on_message(UINT message, WPARAM wparam, LPARAM lparam) {
     }
 }
 
+// No caption: over the clear page Windows would draw its own buttons next to the page's. The thick frame stays
+// for the borders, the shadow, snapping and the system menu.
+void MainWindow::apply_frame() {
+    SetWindowLongPtrW(window_, GWL_STYLE, GetWindowLongPtrW(window_, GWL_STYLE) & ~static_cast<LONG_PTR>(WS_CAPTION));
+    const BOOL dark = TRUE;
+    DwmSetWindowAttribute(window_, DWMWA_USE_IMMERSIVE_DARK_MODE, &dark, sizeof(dark));
+    const DWM_WINDOW_CORNER_PREFERENCE corners = DWMWCP_ROUND;
+    DwmSetWindowAttribute(window_, DWMWA_WINDOW_CORNER_PREFERENCE, &corners, sizeof(corners));
+    // Windows 11 22H2 and later blur what lies behind the window, and the page lets it through where it is
+    // clear. Older versions keep the page opaque.
+    const DWM_SYSTEMBACKDROP_TYPE material = DWMSBT_TRANSIENTWINDOW;
+    backdrop_ = SUCCEEDED(DwmSetWindowAttribute(window_, DWMWA_SYSTEMBACKDROP_TYPE, &material, sizeof(material)));
+    if (backdrop_) {
+        const MARGINS whole{-1, -1, -1, -1};
+        DwmExtendFrameIntoClientArea(window_, &whole);
+    }
+    SetWindowPos(window_, nullptr, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
+LRESULT MainWindow::on_calc_size(WPARAM wparam, LPARAM lparam) {
+    if (!wparam) return DefWindowProcW(window_, WM_NCCALCSIZE, wparam, lparam);
+    auto* sizes = reinterpret_cast<NCCALCSIZE_PARAMS*>(lparam);
+    const RECT proposed = sizes->rgrc[0];
+    const LRESULT result = DefWindowProcW(window_, WM_NCCALCSIZE, wparam, lparam);
+    // Windows keeps its borders on the sides and the bottom, outside what is seen, and the page takes the
+    // rest. A maximized window reaches past the screen by a border on every side, the top too.
+    const LONG border = sizes->rgrc[0].left - proposed.left;
+    sizes->rgrc[0].top = proposed.top + (IsZoomed(window_) ? border : 0);
+    return result;
+}
+
+// How far the invisible resizing border reaches out of the window.
+int MainWindow::frame_thickness() const {
+    RECT frame{};
+    AdjustWindowRectExForDpi(&frame, static_cast<DWORD>(GetWindowLongPtrW(window_, GWL_STYLE)), FALSE, 0,
+                             GetDpiForWindow(window_));
+    return -frame.left;
+}
+
+// Black is clear where Windows draws its material.
+void MainWindow::paint_background(HDC context) {
+    RECT client{};
+    GetClientRect(window_, &client);
+    const COLORREF color = backdrop_ ? RGB(0, 0, 0) : RGB(kPageColor.R, kPageColor.G, kPageColor.B);
+    SetDCBrushColor(context, color);
+    FillRect(context, &client, static_cast<HBRUSH>(GetStockObject(DC_BRUSH)));
+}
+
+json MainWindow::window_state() const {
+    return {{"maximized", IsZoomed(window_) != FALSE}, {"active", active_}, {"backdrop", backdrop_}};
+}
+
+// Posted, not run here: minimizing, closing or resizing inside a WebView2 event would reenter it.
+json MainWindow::window_command(const std::string& method, const json& params) {
+    if (method == "window.minimize") {
+        PostMessageW(window_, WM_SYSCOMMAND, SC_MINIMIZE, 0);
+    } else if (method == "window.maximize") {
+        PostMessageW(window_, WM_SYSCOMMAND, IsZoomed(window_) ? SC_RESTORE : SC_MAXIMIZE, 0);
+    } else if (method == "window.close") {
+        PostMessageW(window_, WM_CLOSE, 0, 0);
+    } else if (method == "window.resize") {
+        // The window has no border above the page, so the page lends its top edge: a press there becomes
+        // the press on a border that Windows resizes from. Only while the button is still down, or the
+        // window would follow the pointer until the next click.
+        const std::string edge = params.value("edge", "top");
+        const WPARAM hit = edge == "topleft" ? HTTOPLEFT : edge == "topright" ? HTTOPRIGHT : HTTOP;
+        const int button = GetSystemMetrics(SM_SWAPBUTTON) ? VK_RBUTTON : VK_LBUTTON;
+        POINT cursor{};
+        if (!IsZoomed(window_) && (GetAsyncKeyState(button) & 0x8000) && GetCursorPos(&cursor)) {
+            ReleaseCapture();
+            PostMessageW(window_, WM_NCLBUTTONDOWN, hit, MAKELPARAM(cursor.x, cursor.y));
+        }
+    } else if (method != "window.state") {
+        throw std::runtime_error("unknown method: " + method);
+    }
+    return window_state();
+}
+
+void MainWindow::post_window_state() {
+    maximized_shown_ = IsZoomed(window_) != FALSE;
+    post({{"event", "window"}, {"data", window_state()}});
+}
+
 void MainWindow::create_webview() {
     const std::filesystem::path profile = options_.data_folder / "webview";
     const HRESULT result = CreateCoreWebView2EnvironmentWithOptions(
@@ -247,7 +345,7 @@ void MainWindow::on_webview_ready(ICoreWebView2Controller* host) {
     host_->get_CoreWebView2(&webview_);
 
     ComPtr<ICoreWebView2Controller2> colored;
-    if (SUCCEEDED(host_.As(&colored))) colored->put_DefaultBackgroundColor(kPageColor);
+    if (SUCCEEDED(host_.As(&colored))) colored->put_DefaultBackgroundColor(backdrop_ ? kClear : kPageColor);
     ComPtr<ICoreWebView2Controller4> droppable;
     if (SUCCEEDED(host_.As(&droppable))) droppable->put_AllowExternalDrop(FALSE);
 
@@ -277,6 +375,9 @@ void MainWindow::configure_webview() {
     if (SUCCEEDED(settings.As(&pinch))) pinch->put_IsPinchZoomEnabled(FALSE);
     ComPtr<ICoreWebView2Settings6> swipe;
     if (SUCCEEDED(settings.As(&swipe))) swipe->put_IsSwipeNavigationEnabled(FALSE);
+    // The page's title bar marks itself with `app-region: drag` and then moves the window like a caption.
+    ComPtr<ICoreWebView2Settings9> regions;
+    if (SUCCEEDED(settings.As(&regions))) regions->put_IsNonClientRegionSupportEnabled(TRUE);
 
     ComPtr<ICoreWebView2_3> mapped;
     if (FAILED(webview_.As(&mapped))) throw std::runtime_error("this WebView2 Runtime is too old");
@@ -341,6 +442,10 @@ void MainWindow::on_web_message(const std::wstring& text) {
             PostMessageW(window_, kPickFolderMessage, static_cast<WPARAM>(request), 0);
             return;
         }
+        if (method.starts_with(kWindowRequests)) {
+            reply(request, window_command(method, message.value("params", json::object())));
+            return;
+        }
         reply(request, controller_->handle(method, message.value("params", json::object())));
     } catch (const std::exception& error) {
         reply_error(request, error.what());
@@ -362,7 +467,9 @@ void MainWindow::on_artwork_request(ICoreWebView2WebResourceRequestedEventArgs* 
     ComPtr<ICoreWebView2WebResourceResponse> response;
     if (artwork && SUCCEEDED(SHCreateStreamOnFileEx(artwork->file.c_str(), STGM_READ | STGM_SHARE_DENY_WRITE,
                                                     FILE_ATTRIBUTE_NORMAL, FALSE, nullptr, &stream))) {
-        const std::wstring headers = L"Content-Type: " + to_wide(artwork->mime);
+        // The page reads how bright a cover is, to darken the player bar behind its text.
+        const std::wstring headers =
+            L"Content-Type: " + to_wide(artwork->mime) + L"\nAccess-Control-Allow-Origin: https://arpegio.example";
         environment_->CreateWebResourceResponse(stream.Get(), 200, L"OK", headers.c_str(), &response);
     } else {
         environment_->CreateWebResourceResponse(nullptr, 404, L"Not Found", L"", &response);

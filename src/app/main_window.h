@@ -12,6 +12,7 @@
 #include <filesystem>
 #include <memory>
 #include <nlohmann/json.hpp>
+#include <optional>
 #include <string>
 
 #include "app/controller.h"
@@ -23,6 +24,7 @@ struct AppOptions {
     std::filesystem::path data_folder;
     std::filesystem::path ui_folder;
     bool dev_tools = false;
+    bool list_devices = true;
 };
 
 class MainWindow {
@@ -39,6 +41,15 @@ public:
 private:
     static LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wparam, LPARAM lparam);
     LRESULT on_message(UINT message, WPARAM wparam, LPARAM lparam);
+
+    // The page draws the title bar, so the frame keeps only its invisible borders for resizing.
+    void apply_frame();
+    LRESULT on_calc_size(WPARAM wparam, LPARAM lparam);
+    int frame_thickness() const;
+    void paint_background(HDC context);
+    nlohmann::json window_state() const;
+    nlohmann::json window_command(const std::string& method, const nlohmann::json& params);
+    void post_window_state();
 
     void create_webview();
     void on_webview_ready(ICoreWebView2Controller* host);
@@ -67,6 +78,9 @@ private:
     Microsoft::WRL::ComPtr<ICoreWebView2Controller> host_;
     Microsoft::WRL::ComPtr<ICoreWebView2> webview_;
     std::string title_shown_;
+    bool backdrop_ = false;  // Windows draws its blurred material behind the page
+    bool active_ = false;
+    std::optional<bool> maximized_shown_;
 };
 
 }  // namespace arpegio

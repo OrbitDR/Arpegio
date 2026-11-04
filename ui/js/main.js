@@ -7,6 +7,7 @@ import { createQueuePanel } from './queuepanel.js';
 import { currentRoute, defineView, go, onRoute, refresh, setOutlet, start } from './router.js';
 import { createSidebar } from './sidebar.js';
 import { connect, forgetCatalogue, set, state, watch } from './store.js';
+import { createTitleBar } from './titlebar.js';
 import { SECTIONS, albumView, albumsView } from './views/albums.js';
 import { artistView, artistsView } from './views/artists.js';
 import { foldersView } from './views/folders.js';
@@ -163,6 +164,7 @@ async function main() {
   defineView('settings', settingsView);
 
   root.append(
+    createTitleBar(),
     createSidebar(),
     h('div.main-column', createTopBar(), scroller),
     createQueuePanel(),

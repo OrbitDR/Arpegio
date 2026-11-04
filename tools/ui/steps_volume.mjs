@@ -72,7 +72,7 @@ export default async function run(page, { sleep }) {
   const signal = await page.eval(`document.querySelector('.signal').innerText`);
   check(signal.includes('Volumen por software'), 'the signal path names the software volume');
   check(signal.includes('Dither TPDF'), 'and its dither');
-  check((await page.eval(`document.querySelector('.bar-quality').innerText`)).includes('Procesado'), 'the bar says it is processed');
+  check((await page.eval(`document.querySelector('.bar-status').textContent`)) === 'Procesado', 'the bar says it is processed');
   await page.shot('50-volume-down');
 
   const volumeBox = await box('.bar-volume');

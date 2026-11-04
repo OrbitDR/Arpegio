@@ -65,3 +65,20 @@ export function shortFormat(track) {
   if (isLossy(track)) return `${track.codec} ${track.bitrate}`;
   return `${track.mqa ? 'MQA ' : ''}${track.bits}/${kilohertz(track.rate)}`;
 }
+
+// The two parts of the format in the player bar: the kind of file, and its resolution.
+const TAGS = { WavPack: 'WV', Vorbis: 'OGG' };
+
+export function formatTag(track) {
+  if (track.mqa) return 'MQA';
+  const codec = track.codec?.split(' ')[0];  // SACD DST is still SACD
+  return TAGS[codec] ?? (codec || (track.dsd ? 'DSD' : 'PCM'));
+}
+
+// In full, and short for when the bar has no room.
+export function formatDetail(track) {
+  const rate = kilohertz(track.rate);
+  if (track.dsd) return [`${dsdName(track.rate)} · ${(track.rate / 1e6).toFixed(1)} MHz`, dsdName(track.rate)];
+  if (isLossy(track)) return track.bitrate ? [`${track.bitrate} kbit/s · ${rate} kHz`, `${track.bitrate} kbit/s`] : [`${rate} kHz`, `${rate} kHz`];
+  return [`${track.bits} bits · ${rate} kHz`, `${track.bits}/${rate}`];
+}

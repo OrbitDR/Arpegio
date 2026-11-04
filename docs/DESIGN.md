@@ -159,6 +159,10 @@ Página (ui/) <── JSON ──> MainWindow (WebView2) <──> Controller ─
 - **Una cola vacía cierra la sesión** con `IsEnabled(false)`, porque de otro modo Windows sigue mostrando la última pista. Parado con cola, en cambio, la sesión sigue abierta con la pista donde retomaría.
 - **Identidad en Windows.** `OrbitDR.Arpegio` es el AppUserModelID del proceso y del acceso directo del instalador. El nombre que Windows muestra sale de `FileDescription`, en los recursos del ejecutable. Si cambia el nombre del programa hay que cambiar los dos.
 - **La prueba de DoP corre en un `Player` aparte.** Así la cola, la posición y el estado de la música no se enteran. Lo que suena se libera antes, igual que con el enchufe, y cualquier música que empiece, también con una tecla multimedia, termina la prueba.
+- **La página dibuja la barra de título.** La ventana pierde `WS_CAPTION` y conserva `WS_THICKFRAME`, el menú de sistema y los botones de minimizar y maximizar. Así Windows sigue dando el borde invisible para redimensionar, la sombra, el ajuste a los bordes de la pantalla y Alt+Espacio, pero no dibuja sus propios botones, que se verían a través de la página transparente. `WM_NCCALCSIZE` da a la página todo salvo los bordes invisibles de los lados y de abajo. La parte libre de la barra lleva `app-region: drag`, que WebView2 convierte en una ventana hija que responde `HTCAPTION`, así que arrastrar, el doble clic y el menú de sistema son los de Windows. Arriba no queda borde: una franja de 5 px de la página pide a la ventana que empiece a redimensionar con `WM_NCLBUTTONDOWN`, y solo si el botón sigue pulsado, porque si no la ventana seguiría al puntero hasta el siguiente clic. Sin título, Windows maximizaría encima de la barra de tareas, y `WM_GETMINMAXINFO` lo limita al área de trabajo.
+- **Paneles sobre el material de Windows.** Desde Windows 11 22H2, `DWMWA_SYSTEMBACKDROP_TYPE` pone detrás de toda la ventana el acrílico de las ventanas transitorias, que desenfoca lo que hay detrás. La página es transparente salvo la hoja central, que tiene su propio color para que lo que se lee no cambie con el fondo. En versiones anteriores la página recibe `backdrop: false`, pinta todo opaco con la clase `solid`, y los paneles quedan como antes.
+- **La barra inferior toma el color de la portada.** La miniatura se dibuja una sola vez en un lienzo de 64 × 16 px, desenfocada, y se estira sobre la barra, de modo que no hay ningún desenfoque que recalcular en cada fotograma. Se oscurece lo justo para que su punto más claro quede por debajo de una luminancia de 0.07: el texto blanco queda a unos 8:1 de contraste y el gris de la barra por encima de 4.5:1. Para medirlo la página lee los píxeles, y por eso las respuestas de las portadas llevan `Access-Control-Allow-Origin`.
+- **El transporte queda en el centro de la ventana.** Las dos columnas de los lados de la barra son `minmax(0, 1fr)` y siempre miden lo mismo, así que nada de lo que crezca a un lado lo empuja. A la derecha, el formato se muestra completo si cabe y abreviado si no, medido en fracciones de píxel porque un solo píxel entero de menos ya trae los puntos suspensivos. Si tampoco así cabe, desaparece el deslizador de volumen.
 
 ## Instalador
 
@@ -228,6 +232,19 @@ Dos fallos que las pruebas no encontraron, vistos al releer el código:
 `tools\ui\run.ps1` se pasó en los dos DAC. Con el SMSL salieron a la luz dos errores de la propia batería: el paso de CPU buscaba el proceso solo en `build\release`, así que con otro preset medía un 0 % falso y lo daba por bueno, y la prueba de DoP se saltaba WASAPI exclusivo sin fallar. Los dos pasos ya fallan si no encuentran lo que deben medir.
 
 Instalador, en este equipo: instalación silenciosa, ejecutable con la versión y el nombre correctos, solo DLL de Windows entre sus dependencias, la copia instalada se registra como sesión multimedia `OrbitDR.Arpegio`, y la desinstalación deja la carpeta, el acceso directo y el registro limpios, con los datos intactos.
+
+## Verificación del marco de la ventana, 2026-11-04
+
+Sobre la aplicación real, en Windows 11 con una pantalla de 2560 × 1440 al 100 % y el texto de Windows al 110 %, que WebView2 aplica como escala 1.1. Lo reproduce `tools\ui\steps_frame.mjs`, que no reproduce nada y puede correr con `--no-devices` mientras otro programa usa el DAC.
+
+- Con `WS_CAPTION`, los botones de Windows se veían tenues detrás de los de la página. Sin él, no.
+- Con eventos reales del sistema: arrastrar la barra de título mueve la ventana exactamente lo arrastrado, la franja de arriba la agranda lo arrastrado, y el doble clic maximiza y restaura.
+- Maximizada ocupa justo el área de trabajo, 2560 × 1392, sin tapar la barra de tareas. Sin `WM_GETMINMAXINFO` la tapaba.
+- Los botones de la página maximizan, restauran al mismo sitio y tamaño, y minimizan. Cerrar termina el proceso.
+- Una petición de redimensionar sin el botón pulsado no mueve nada.
+- Con una ventana de franjas de colores detrás, los paneles laterales y la barra de título las dejan ver desenfocadas, y la hoja central no. Con la ventana inactiva, Windows pasa el material a un gris liso.
+- El botón de reproducir queda a menos de 1 px del centro de la ventana a 1600, 1320, 1081, 1080 y 900 px, con la cola abierta y cerrada y con títulos cortos y largos.
+- A 1320 px el formato cabe completo, y desde 1081 px toma la forma corta sin cortarse. A 900 px desaparece el deslizador de volumen.
 
 ## Verificación de los clics, 2026-11-01
 

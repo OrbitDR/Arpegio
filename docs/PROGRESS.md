@@ -1,10 +1,12 @@
 # Progreso de Arpegio
 
-Punto de partida para retomar el desarrollo. Última sesión: 2026-11-01. El diseño y las decisiones técnicas están en [DESIGN.md](DESIGN.md).
+Punto de partida para retomar el desarrollo. Última sesión: 2026-11-04. El diseño y las decisiones técnicas están en [DESIGN.md](DESIGN.md).
 
 ## Dónde estamos
 
 La aplicación `arpegio.exe` funciona de punta a punta: biblioteca, cola, reproducción y ajustes por dispositivo, con la colección real y por las salidas reales. Tiene volumen por software, ReplayGain, dos remuestreadores, controles de Windows, prueba guiada de DoP e instalador. Toda la verificación de la interfaz se hizo con silencio digital, así que falta que el usuario la escuche con música.
+
+El 2026-11-04, a petición del usuario, la interfaz cambió de aspecto: barra de título propia, paneles laterales translúcidos sobre el acrílico de Windows, barra inferior teñida con la portada, el transporte siempre en el centro de la ventana, los botones de sección en negrita y un indicador nuevo de formato y bit-perfect, sin el visto. Ver [Interfaz](DESIGN.md#interfaz) y [Marco de la ventana](DESIGN.md#verificación-del-marco-de-la-ventana-2026-11-04).
 
 | Fase | Estado |
 |---|---|
@@ -120,6 +122,7 @@ Los detalles y cifras están en [DESIGN.md](DESIGN.md#verificación-hecha-el-202
 - Controles de Windows leídos y manejados desde fuera de la aplicación, y teclas multimedia reales.
 - Instalador: instalar, abrir y desinstalar en este equipo, conservando los datos.
 - Clics con eventos de ratón reales: cada botón de la barra inferior acepta el clic en todos sus puntos, también si una actualización de estado llega durante la pulsación o si su icono cambia entre presionar y soltar. Ver [Clics](DESIGN.md#verificación-de-los-clics-2026-11-01).
+- Barra de título propia con eventos reales del sistema: arrastrar, redimensionar por arriba, doble clic, maximizar sin tapar la barra de tareas, minimizar y cerrar. El transporte queda centrado a cualquier ancho. Ver [Marco de la ventana](DESIGN.md#verificación-del-marco-de-la-ventana-2026-11-04).
 - Liberar el dispositivo contra otro proceso real, en WASAPI exclusivo y en ASIO con DSD nativo.
 - `LOOPBACK` del MiniFuse: coincidencia total a 24 bits en 44.1, 96 y 192 kHz.
 - Música real por ASIO en el Topping con `arpegio.exe`: lo que recibe el driver coincide al 100 % con un WAV 16/44.1 y es idéntico a lo que envía Audirvana. Ver [Comparación con Audirvana](DESIGN.md#comparación-con-audirvana-por-asio-2026-11-01).
@@ -136,6 +139,9 @@ Los detalles y cifras están en [DESIGN.md](DESIGN.md#verificación-hecha-el-202
 
 ## Implementado pero sin verificar
 
+- **La interfaz nueva con `tools\ui\run.ps1` completo.** `steps_frame.mjs`, `steps_sections.mjs` y las 190 pruebas pasaron, pero los pasos que reproducen silencio por el DAC, con los cambios de `steps_clicks.mjs` y `steps_volume.mjs`, no se han ejecutado: Audirvana y Arpegio estaban abiertos.
+- Windows 10 y Windows 11 anterior a 22H2, donde los paneles quedan opacos y Windows no dibuja el borde de arriba. Solo se probó Windows 11 con el acrílico.
+- Otras escalas de pantalla que el 100 % con el texto al 110 %, y maximizar en un segundo monitor de otro tamaño.
 - **Interfaz con música real.** Todas las rutas se recorrieron con silencio digital y señal inaudible. Falta escuchar seek, siguiente, anterior, cambio de salida y liberar el dispositivo con música, por si hay clics.
 - Controles de Windows a la vista. La sesión se leyó y se manejó desde fuera con la misma API que usan el panel de medios y la pantalla de bloqueo, y las teclas multimedia reales funcionan, pero nadie miró la pantalla de bloqueo. Los botones de la miniatura en la barra de tareas no se han visto: solo se probó que el programa recibe sus clics.
 - Volumen con música: la rampa de 20 ms se midió sobre los datos, no de oído.
@@ -202,11 +208,14 @@ Tres comprobaciones fallaban de vez en cuando, casi siempre con la CPU cargada. 
 - Actualizar la lista de dispositivos exige parar la música: cargar otra copia de un driver ASIO en uso puede tumbarlo. El botón de liberar el dispositivo basta para eso. En WASAPI compartido está desactivado, y la única forma de parar es vaciar la cola.
 - Sin arrastrar archivos desde el Explorador.
 - WebView2 ocupa unos 420 MB de memoria en 7 procesos.
+- Al pasar sobre el botón de maximizar no aparecen los diseños de ajuste de Windows 11, porque el botón es de la página. Windows+Z los abre.
+- Con la ventana inactiva, Windows muestra el material de los paneles como un gris liso.
 
 ## Siguiente trabajo
 
 Lo que solo puede hacer el usuario:
 
+- Mirar la interfaz nueva: barra de título, paneles translúcidos, la barra inferior con distintas portadas y el indicador de formato.
 - Escuchar la interfaz con música: seek, siguiente, anterior, cambio de salida y liberar el dispositivo, por si hay clics.
 - Bajar y subir el volumen con música.
 - Mirar los controles de la pantalla de bloqueo y los botones de la miniatura en la barra de tareas.
@@ -231,7 +240,7 @@ Opcional, sin pedir por nadie:
 | `src/formats/` | Lector DSF y escritor WAV |
 | `src/library/` | `library` coordina; `library_store` es el catálogo en SQLite; `scanner` lee las carpetas; `metadata`, `mqa`, `artwork` y `cue_sheet` son sus piezas; `track_source` conecta con el motor |
 | `src/app/` | `controller` es la aplicación, sin ventanas y por tanto comprobable; `main_window` es la ventana con WebView2; `media_controls` son los controles de Windows; `settings` son los ajustes |
-| `ui/` | La página, en JavaScript sin dependencias. `store` guarda el estado, `router` las vistas, `views/` cada vista y `signal` la ruta de la señal |
+| `ui/` | La página, en JavaScript sin dependencias. `store` guarda el estado, `router` las vistas, `views/` cada vista, `signal` la ruta de la señal, `titlebar` la barra de título y `playerbar` la barra inferior |
 | `cli/` | `arpegio-cli` y `arpegio-dsd2wav` |
 | `tests/` | Pruebas automáticas, con salidas simuladas en `test_player.cpp` y `test_controller.cpp`, y la biblioteca en `test_library.cpp` |
 | `tools/` | Generador DSD, informes, `arpegio-library`, `measure/` y `ui/` |
@@ -295,7 +304,7 @@ Aplicación real, con silencio digital por las salidas reales. La carpeta de mú
 powershell -File tools\ui\run.ps1 -MusicFolder "D:\Música" -Device topping
 ```
 
-`-Build dist` usa el ejecutable del preset `dist`. Conviene cerrar antes Arpegio y Audirvana: la prueba necesita las salidas libres, y otra sesión multimedia se quedaría con las teclas. Abre y cierra la ventana varias veces, minimiza, pulsa teclas multimedia, abre el dispositivo desde otro proceso y cambia el formato del DAC. Con la colección real tarda unos 5 minutos. Las capturas quedan en `%TEMP%\arpegio-ui-check\shots`. `tools\ui\check.mjs` sirve para escribir otras pruebas: controla la aplicación por el protocolo de DevTools de Chromium con `--devtools`. Devuelve error si falla cualquier comprobación de un paso.
+`-Build dist` usa el ejecutable del preset `dist`. Conviene cerrar antes Arpegio y Audirvana: la prueba necesita las salidas libres, y otra sesión multimedia se quedaría con las teclas. Abre y cierra la ventana varias veces, minimiza, pulsa teclas multimedia, abre el dispositivo desde otro proceso y cambia el formato del DAC. Con la colección real tarda unos 5 minutos. Las capturas quedan en `%TEMP%\arpegio-ui-check\shots`. `tools\ui\check.mjs` sirve para escribir otras pruebas: controla la aplicación por el protocolo de DevTools de Chromium con `--devtools`. Devuelve error si falla cualquier comprobación de un paso. Con `--no-devices` la aplicación no lista salidas, y así los pasos que no reproducen nada, como `steps_frame.mjs` y `steps_sections.mjs`, pueden correr mientras otro programa usa el DAC: listar carga todos los drivers ASIO.
 
 Señal inaudible para probar hardware: `arpegio-dsdgen` sin tonos, por ejemplo `.\arpegio-dsdgen.exe quiet64.dsf ntf64.txt 2822400 20`. Para otras tasas, generar antes el diseño con `design_ntf.py 128` o `256`.
 

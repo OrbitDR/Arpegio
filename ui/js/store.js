@@ -9,6 +9,7 @@ export const state = {
   playlists: [],
   devices: { known: false, selected: '', list: [] },
   queueOpen: false,
+  window: { maximized: false, active: true, backdrop: true },
 };
 
 const watchers = new Map();
@@ -60,6 +61,7 @@ export async function connect() {
     set('queue', queue);
   });
   listen('devices', (devices) => set('devices', devices));
+  listen('window', (frame) => set('window', frame));
   listen('playlists', (playlists) => set('playlists', playlists));
   listen('library', (library) => {
     const changed = library.revision !== state.library?.revision;
@@ -71,7 +73,8 @@ export async function connect() {
     }
   });
 
-  const initial = await call('app.state');
+  const [initial, frame] = await Promise.all([call('app.state'), call('window.state')]);
+  set('window', frame);
   state.sacdMultichannel = initial.sacdMultichannel;
   state.replayGain = initial.replayGain;
   state.resampler = initial.resampler;

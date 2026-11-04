@@ -2,9 +2,11 @@
 // checks inside the page and reports console errors. Needs Node 22 or later for its WebSocket client.
 //
 //   node tools/ui/check.mjs [--exe build/release/arpegio.exe] [--data FOLDER] [--out FOLDER] [--port 9333]
-//                           [--steps FILE.mjs] [--keep-open]
+//                           [--steps FILE.mjs] [--keep-open] [--no-devices]
 //
-// A step file exports `default async function (page)`, using page.go, page.shot, page.eval and page.wait.
+// A step file exports `default async function (page, { sleep, out, data, pid })`, using page.go, page.shot,
+// page.eval and page.wait. --no-devices starts the application without listing outputs, for steps that play
+// nothing while another program uses the DAC.
 import { spawn } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -22,11 +24,12 @@ const data = resolve(option('data', join(tmpdir(), 'arpegio-ui-check')));
 const out = resolve(option('out', join(tmpdir(), 'arpegio-ui-check-shots')));
 const steps = option('steps');
 const keepOpen = process.argv.includes('--keep-open');
+const noDevices = process.argv.includes('--no-devices');
 
 mkdirSync(out, { recursive: true });
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
 
-const app = spawn(exe, ['--data', data, '--devtools'], {
+const app = spawn(exe, ['--data', data, '--devtools', ...(noDevices ? ['--no-devices'] : [])], {
   env: { ...process.env, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}` },
   stdio: 'ignore',
 });
@@ -136,12 +139,15 @@ async function main() {
   await page.send('Page.enable');
   await page.send('Runtime.enable');
   await page.send('Log.enable');
+  // The page is clear where Windows draws its blurred material, which a capture of the page alone leaves
+  // white. A dark backing makes the captures look like the window.
+  await page.send('Emulation.setDefaultBackgroundColorOverride', { color: { r: 32, g: 33, b: 36, a: 1 } });
   await page.wait(`document.querySelector('.page') !== null`);
 
   if (steps) {
     const path = isAbsolute(steps) ? steps : resolve(steps);
     const { default: run } = await import(pathToFileURL(path).href);
-    await run(page, { sleep, out, data });
+    await run(page, { sleep, out, data, pid: app.pid });
   } else {
     await page.size(1320, 860);
     await page.shot('start');

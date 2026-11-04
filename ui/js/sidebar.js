@@ -33,7 +33,6 @@ export function createSidebar() {
   };
 
   const sidebar = h('nav.sidebar', { ariaLabel: 'Secciones' },
-    h('div.brand', h('img', { src: 'mark.svg', alt: '', width: 26, height: 26 }), h('span', 'Arpegio')),
     h('div.nav-group', LINKS.map(([view, iconName, label]) => navLink(view, iconName, label))),
     h('div.nav-title', h('span', 'Listas'), iconButton('add', 'Lista nueva', createPlaylist, { size: 18 })),
     playlists,
