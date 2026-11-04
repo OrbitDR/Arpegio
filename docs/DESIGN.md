@@ -245,6 +245,7 @@ Sobre la aplicación real, en Windows 11 con una pantalla de 2560 × 1440 al 100
 - Con una ventana de franjas de colores detrás, los paneles laterales y la barra de título las dejan ver desenfocadas, y la hoja central no. Con la ventana inactiva, Windows pasa el material a un gris liso.
 - El botón de reproducir queda a menos de 1 px del centro de la ventana a 1600, 1320, 1081, 1080 y 900 px, con la cola abierta y cerrada y con títulos cortos y largos.
 - A 1320 px el formato cabe completo, y desde 1081 px toma la forma corta sin cortarse. A 900 px desaparece el deslizador de volumen.
+- Coste, con un estado simulado en la página cada 200 ms como al sonar: la aplicación y sus procesos de WebView2 usan entre 1.0 y 1.3 % de un núcleo, frente a 1.7 y 2.0 % de la página anterior en la misma ventana. El compositor de Windows usa entre 0.2 y 0.7 % de un núcleo con el acrílico y sin él, y la GPU 3D menos del 0.1 %. Una primera tanda dio un 5 o 6 % en el compositor con las dos páginas, por otra actividad del equipo en ese momento.
 
 ## Verificación de los clics, 2026-11-01
 
