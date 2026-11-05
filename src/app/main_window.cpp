@@ -40,6 +40,11 @@ constexpr int kDefaultHeight = 860;
 constexpr int kMinimumWidth = 900;
 constexpr int kMinimumHeight = 600;
 
+// Undocumented: with visual styles, DefWindowProc draws the caption and the frame through these. On a window
+// without a caption it would draw the top of the frame over the page, as Chromium also found.
+constexpr UINT kDrawThemedCaption = 0x00AE;  // WM_NCUAHDRAWCAPTION
+constexpr UINT kDrawThemedFrame = 0x00AF;    // WM_NCUAHDRAWFRAME
+
 constexpr const char* kPickFolderRequest = "library.pickFolder";
 constexpr std::string_view kWindowRequests = "window.";
 
@@ -129,9 +134,25 @@ LRESULT MainWindow::on_message(UINT message, WPARAM wparam, LPARAM lparam) {
     switch (message) {
     case WM_NCCALCSIZE:
         return on_calc_size(wparam, lparam);
-    case WM_ERASEBKGND:
-        paint_background(reinterpret_cast<HDC>(wparam));
+    // Windows paints its frame as if the window still had a top border, and that border stayed over the clear
+    // title bar as a grey strip. Activation is told not to paint, the theme's own drawing is refused, and after
+    // the frame painting that cannot be refused, which also draws the shadow, the strip is painted clear again.
+    case WM_NCACTIVATE:
+        return DefWindowProcW(window_, message, wparam, -1);
+    case kDrawThemedCaption:
+    case kDrawThemedFrame:
+        return 0;
+    case WM_NCPAINT: {
+        const LRESULT result = DefWindowProcW(window_, message, wparam, lparam);
+        clear_top_border();
+        return result;
+    }
+    case WM_ERASEBKGND: {
+        RECT client{};
+        GetClientRect(window_, &client);
+        paint_background(reinterpret_cast<HDC>(wparam), client);
         return 1;
+    }
     case WM_ACTIVATE:
         active_ = LOWORD(wparam) != WA_INACTIVE;
         post_window_state();
@@ -261,12 +282,21 @@ int MainWindow::frame_thickness() const {
 }
 
 // Black is clear where Windows draws its material.
-void MainWindow::paint_background(HDC context) {
-    RECT client{};
-    GetClientRect(window_, &client);
+void MainWindow::paint_background(HDC context, const RECT& area) {
     const COLORREF color = backdrop_ ? RGB(0, 0, 0) : RGB(kPageColor.R, kPageColor.G, kPageColor.B);
     SetDCBrushColor(context, color);
-    FillRect(context, &client, static_cast<HBRUSH>(GetStockObject(DC_BRUSH)));
+    FillRect(context, &area, static_cast<HBRUSH>(GetStockObject(DC_BRUSH)));
+}
+
+// The band under the page where Windows would have the top of its frame.
+void MainWindow::clear_top_border() {
+    RECT band{};
+    GetClientRect(window_, &band);
+    band.bottom = band.top + frame_thickness();
+    if (HDC context = GetDC(window_)) {
+        paint_background(context, band);
+        ReleaseDC(window_, context);
+    }
 }
 
 json MainWindow::window_state() const {

@@ -46,7 +46,8 @@ private:
     void apply_frame();
     LRESULT on_calc_size(WPARAM wparam, LPARAM lparam);
     int frame_thickness() const;
-    void paint_background(HDC context);
+    void paint_background(HDC context, const RECT& area);
+    void clear_top_border();
     nlohmann::json window_state() const;
     nlohmann::json window_command(const std::string& method, const nlohmann::json& params);
     void post_window_state();

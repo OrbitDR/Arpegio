@@ -121,7 +121,7 @@ html.solid #app { background: var(--panel); }
 html.inactive .title-brand, html.inactive .caption-button:not(:hover) { color: var(--faint); }
 
 .resize-edge { position: fixed; top: 0; z-index: 70; height: 5px; -webkit-app-region: no-drag; app-region: no-drag; }
-.resize-edge.top { left: 16px; right: 16px; cursor: n-resize; }
+.resize-edge.top { left: 0; right: 0; cursor: n-resize; }
 .resize-edge.topleft { left: 0; width: 16px; cursor: nw-resize; }
 .resize-edge.topright { right: 0; width: 16px; cursor: ne-resize; }
 html.maximized .resize-edge { display: none; }

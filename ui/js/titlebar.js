@@ -41,8 +41,9 @@ export function createTitleBar() {
       captionButton(GLYPHS.minimize, 'Minimizar', 'window.minimize', 'minimize'),
       maximize,
       captionButton(GLYPHS.close, 'Cerrar', 'window.close', 'close')),
-    resizeEdge('topleft'),
+    // The corners lie over the ends of the top edge, so no sliver between them is left to the title bar.
     resizeEdge('top'),
+    resizeEdge('topleft'),
     resizeEdge('topright'));
 
   watch('window', ({ maximized, active, backdrop }) => {

@@ -18,9 +18,12 @@ const HTCAPTION = 2;
 
 // Finds the window by process, since the user's own Arpegio may be open beside this one.
 const NATIVE = (pid) => `
-Add-Type -TypeDefinition @'
-using System; using System.Runtime.InteropServices; using System.Text;
+Add-Type -ReferencedAssemblies System.Drawing -TypeDefinition @'
+using System; using System.Runtime.InteropServices; using System.Text; using System.Drawing;
 public static class Frame {
+  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+  [DllImport("user32.dll")] public static extern void SwitchToThisWindow(IntPtr h, bool alt);
+  [DllImport("user32.dll")] public static extern bool RedrawWindow(IntPtr h, IntPtr r, IntPtr g, uint f);
   public delegate bool EnumProc(IntPtr h, IntPtr l);
   [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc f, IntPtr l);
   [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint p);
@@ -58,6 +61,17 @@ public static class Frame {
   public static long Hit(int x, int y) {
     var p = new POINT { X = x, Y = y };
     return SendMessageW(WindowFromPoint(p), 0x84, IntPtr.Zero, (IntPtr)((y << 16) | (x & 0xFFFF))).ToInt64();
+  }
+  // How bright the screen is down the first rows of the window, in the middle of the title bar.
+  public static string TopRows(IntPtr h) {
+    SwitchToThisWindow(h, true); SetForegroundWindow(h); System.Threading.Thread.Sleep(700);
+    RECT r; DwmGetWindowAttribute(h, 9, out r, 16);
+    using (var b = new Bitmap(1, 10)) {
+      using (var g = Graphics.FromImage(b)) g.CopyFromScreen(r.Left + (r.Right - r.Left) / 2, r.Top, 0, 0, b.Size);
+      var rows = new string[10];
+      for (int y = 0; y < 10; y++) { var c = b.GetPixel(0, y); rows[y] = (c.R + c.G + c.B).ToString(); }
+      return "[" + string.Join(",", rows) + "]";
+    }
   }
 }
 '@
@@ -124,6 +138,20 @@ export default async function run(page, { sleep, pid }) {
     return { top, height, cursor: getComputedStyle(element).cursor };
   })()`);
   check(edge.top === 0 && edge.height >= 4 && edge.cursor === 'n-resize', `the top edge resizes (${JSON.stringify(edge)})`);
+
+  // Windows paints its frame as if the window still had a top border, and on 2026-11-04 that border stayed
+  // over the clear title bar as a grey strip after every change of focus. Rows 1 to 6 must stay as dark as
+  // the title bar below them, after a change of focus and after the frame is painted again.
+  for (const [label, script] of [
+    ['a change of focus', '[void][Frame]::SendMessageW($h, 0x86, [IntPtr]::Zero, [IntPtr]::Zero); [void][Frame]::SendMessageW($h, 0x86, [IntPtr]1, [IntPtr]::Zero)'],
+    ['the frame is painted again', '[void][Frame]::RedrawWindow($h, [IntPtr]::Zero, [IntPtr]::Zero, 0x501)'],
+  ]) {
+    powershell(script);
+    await sleep(300);
+    const rows = JSON.parse(powershell('[Frame]::TopRows($h)'));
+    const strip = rows.slice(1, 7).some((value) => value - rows[8] > 30);
+    check(!strip, `no grey strip at the top after ${label} (${rows.join(' ')})`);
+  }
 
   // Without the button held, a resize request must do nothing, or the window would follow the pointer.
   await page.call('window.resize', { edge: 'top' });
